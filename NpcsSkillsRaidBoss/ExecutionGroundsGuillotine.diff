@@ -1,0 +1,1538 @@
+diff --git a/dist/game/data/scripts/ai/areas/ExecutionGrounds/Guillotine.java b/dist/game/data/scripts/ai/areas/ExecutionGrounds/Guillotine.java
+new file mode 100644
+index 0000000000..a7abd14abe
+--- /dev/null
++++ b/dist/game/data/scripts/ai/areas/ExecutionGrounds/Guillotine.java
+@@ -0,0 +1,559 @@
++/*
++ * This file is part of the L2J Mobius project.
++ * 
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ * 
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
++ * General Public License for more details.
++ * 
++ * You should have received a copy of the GNU General Public License
++ * along with this program. If not, see <http://www.gnu.org/licenses/>.
++ */
++package ai.areas.ExecutionGrounds;
++
++import java.util.ArrayList;
++import java.util.Calendar;
++import java.util.List;
++import java.util.Map;
++import java.util.concurrent.ConcurrentHashMap;
++
++import org.l2jmobius.commons.threads.ThreadPool;
++import org.l2jmobius.gameserver.data.SpawnTable;
++import org.l2jmobius.gameserver.data.xml.NpcData;
++import org.l2jmobius.gameserver.instancemanager.DBSpawnManager;
++import org.l2jmobius.gameserver.instancemanager.GlobalVariablesManager;
++import org.l2jmobius.gameserver.instancemanager.ZoneManager;
++import org.l2jmobius.gameserver.model.Location;
++import org.l2jmobius.gameserver.model.Spawn;
++import org.l2jmobius.gameserver.model.World;
++import org.l2jmobius.gameserver.model.actor.Npc;
++import org.l2jmobius.gameserver.model.actor.Player;
++import org.l2jmobius.gameserver.model.actor.templates.NpcTemplate;
++import org.l2jmobius.gameserver.model.holders.SkillHolder;
++import org.l2jmobius.gameserver.model.skill.SkillCaster;
++import org.l2jmobius.gameserver.model.zone.type.ArenaZone;
++import org.l2jmobius.gameserver.network.NpcStringId;
++import org.l2jmobius.gameserver.network.serverpackets.ExShowScreenMessage;
++
++import ai.AbstractNpcAI;
++
++/**
++ * @author Notorion
++ */
++public class Guillotine extends AbstractNpcAI
++{
++	// NPC
++	private static final int MAIN_BOSS_ID = 29402; // RaidBoss Guillotine
++	private static Npc spawnedMainBoss; // Reference to the main Guillotine
++	private static final Location SPAWN_LOCATION = new Location(44967, 155944, -2708); // Guillotine Respawn location
++	
++	// Barrier skill and attack control
++	private static final SkillHolder LIMIT_BARRIER = new SkillHolder(29518, 1);
++	private static final int HIT_COUNT = 500; // Amount of attacks to break the barrier
++	private boolean barrierActivated = false;
++	private final Map<Npc, Integer> guillotineHits = new ConcurrentHashMap<>(); // Screening of attacks
++	private final Map<Npc, Boolean> _clonesTemp94 = new ConcurrentHashMap<>();
++	private final Map<Npc, Boolean> _clonesTemp75 = new ConcurrentHashMap<>();
++	private final Map<Npc, Boolean> _clonesTemp42 = new ConcurrentHashMap<>();
++	
++	// NPCs of Clones and Slaves
++	private static final int CLONE_NPC_ID = 29403;
++	private static final int SLAVE1_NPC_ID = 29404;
++	private static final int SLAVE2_NPC_ID = 29405;
++	private static final int SLAVE3_NPC_ID = 29406;
++	// ID of temporary Clones NPCs
++	private static final int CLONESTEMP94_NPC_ID = 29403;
++	private static final int CLONESTEMP75_NPC_ID = 29403;
++	private static final int CLONESTEMP42_NPC_ID = 29403;
++	
++	// Temporary clones control variables
++	private boolean _spawningClonesTemp94 = false;
++	private boolean _spawningClonesTemp75 = false;
++	private boolean _spawningClonesTemp42 = false;
++	private boolean _spawningClones95 = false;
++	private boolean _spawningClones75 = false;
++	private boolean _spawningClones50 = false;
++	private boolean _spawningSlaves93 = false;
++	private boolean _spawningSlaves70 = false;
++	private boolean _spawningSlaves50 = false;
++	private boolean _spawningSlaves45 = false;
++	private boolean _spawningSlaves40 = false;
++	private boolean _spawningSlaves25 = false;
++	private boolean _spawningSlaves15 = false;
++	private boolean _spawningSlaves5 = false;
++	private boolean _spawningSlaves1 = false;
++	
++	// Slaves Effects Skills
++	private static final SkillHolder SLAVE1_DEATH_SKILL = new SkillHolder(34464, 1); 
++	private static final SkillHolder SLAVE2_DEATH_SKILL = new SkillHolder(34465, 1); 
++	private static final SkillHolder SLAVE3_DEATH_SKILL = new SkillHolder(34466, 1); 
++	
++	public Guillotine()
++	{
++		addKillId(MAIN_BOSS_ID); 
++		addKillId(SLAVE1_NPC_ID, SLAVE2_NPC_ID, SLAVE3_NPC_ID);
++		addAttackId(SLAVE1_NPC_ID, SLAVE2_NPC_ID, SLAVE3_NPC_ID);
++		addAttackId(MAIN_BOSS_ID);
++		
++		final long currentTime = System.currentTimeMillis();
++		final Calendar calendarGuillotineStart = Calendar.getInstance();
++		
++		// Spawn time to 21h00 Thursday
++		calendarGuillotineStart.set(Calendar.DAY_OF_WEEK, Calendar.THURSDAY); 
++		calendarGuillotineStart.set(Calendar.HOUR_OF_DAY, 21); 
++		calendarGuillotineStart.set(Calendar.MINUTE, 0); 
++		calendarGuillotineStart.set(Calendar.SECOND, 0); 
++		
++		if ((currentTime > calendarGuillotineStart.getTimeInMillis()) && (SpawnTable.getInstance().getAnySpawn(MAIN_BOSS_ID) == null) && GlobalVariablesManager.getInstance().getBoolean("GUILLOTINE_ALIVE", true))
++		{
++			spawnGuillotine(); 
++		}
++		
++		if (calendarGuillotineStart.getTimeInMillis() < currentTime)
++		{
++			calendarGuillotineStart.add(Calendar.WEEK_OF_YEAR, 1); 
++		}
++
++		ThreadPool.scheduleAtFixedRate(() ->
++		{
++			spawnGuillotine(); 
++		}, calendarGuillotineStart.getTimeInMillis() - currentTime, 604800000); 
++	}
++	
++	private void spawnGuillotine()
++	{
++		try
++		{
++			final NpcTemplate template = NpcData.getInstance().getTemplate(MAIN_BOSS_ID);
++			final Spawn spawn = new Spawn(template);
++			spawn.setXYZ(SPAWN_LOCATION);
++			spawn.setHeading(0);
++			spawn.setRespawnDelay(0);
++
++			Npc boss = DBSpawnManager.getInstance().addNewSpawn(spawn, false);
++			spawnedMainBoss = boss;
++			GlobalVariablesManager.getInstance().set("GUILLOTINE_ALIVE", true);
++			
++			// Barrier
++			LIMIT_BARRIER.getSkill().applyEffects(spawnedMainBoss, spawnedMainBoss); 
++			spawnedMainBoss.setInvul(true); 
++			barrierActivated = true;
++			startQuestTimer("guillotine_barrier_start", 1000, spawnedMainBoss, null);
++			
++			startQuestTimer("check_arena", 10000, null, null, true); // Verification every 10 seconds
++		}
++		catch (Exception e)
++		{
++			e.printStackTrace();
++		}
++	}
++
++	@Override
++	public String onEvent(String event, Npc npc, Player player)
++	{
++		switch (event)
++		{
++			case "check_arena":
++			{
++				if (spawnedMainBoss != null) 
++				{
++					checkBossInArena(); 
++					checkBossHP(); 
++				}
++				break;
++			}
++		}
++		return super.onEvent(event, npc, player);
++	}
++	
++	@Override
++	public String onAttack(Npc npc, Player attacker, int damage, boolean isSummon)
++	{
++		if (npc.getId() == MAIN_BOSS_ID)
++		{
++			if (barrierActivated)
++			{
++				int hits = guillotineHits.getOrDefault(npc, 0) + 1;
++				guillotineHits.put(npc, hits);
++				
++				if (hits >= HIT_COUNT)
++				{
++					barrierActivated = false; 
++					npc.stopSkillEffects(LIMIT_BARRIER.getSkill()); 
++					npc.setInvul(false); 
++				}
++				return null;
++			}
++			
++			ArenaZone arenaZone = ZoneManager.getInstance().getZoneById(9900099, ArenaZone.class);
++			if ((arenaZone != null) && !arenaZone.isInsideZone(attacker))
++			{
++				// If the player is not in the arena, teleports to Dion. Protection Boss.
++				attacker.teleToLocation(new Location(15804, 142347, -2680), false);
++				return null;
++			}
++		}
++		
++		handleSlaveLogic(npc); 
++		
++		return super.onAttack(npc, attacker, damage, isSummon);
++	}
++	
++	private void handleSlaveLogic(Npc npc)
++	{
++		if ((npc.getId() == SLAVE1_NPC_ID) || (npc.getId() == SLAVE2_NPC_ID) || (npc.getId() == SLAVE3_NPC_ID))
++		{
++			double currentHp = npc.getCurrentHp();
++			double maxHp = npc.getMaxHp();
++			double hpPercentage = (currentHp / maxHp) * 100;
++			
++			if (currentHp <= 1)
++			{
++				npc.setCurrentHp(2); 
++			}
++			
++			if (hpPercentage <= 30)
++			{
++				applyDeathSkill(npc); 
++			}
++		}
++	}
++	
++	private final Map<Npc, Boolean> deathSkillUsed = new ConcurrentHashMap<>();
++	
++	private void applyDeathSkill(Npc npc)
++	{
++		if (deathSkillUsed.getOrDefault(npc, false))
++		{
++			return; 
++		}
++		
++		deathSkillUsed.put(npc, true);
++		SkillHolder skillToUse = null;
++		
++		switch (npc.getId())
++		{
++			case SLAVE1_NPC_ID:
++				skillToUse = SLAVE1_DEATH_SKILL;
++				break;
++			case SLAVE2_NPC_ID:
++				skillToUse = SLAVE2_DEATH_SKILL;
++				break;
++			case SLAVE3_NPC_ID:
++				skillToUse = SLAVE3_DEATH_SKILL;
++				break;
++			default:
++				return;
++		}
++		
++		if ((skillToUse != null) && (skillToUse.getSkill() != null))
++		{
++			SkillCaster.triggerCast(npc, npc, skillToUse.getSkill());
++			
++			ThreadPool.execute(() ->
++			{
++				try
++				{
++					Thread.sleep(1500); 
++				}
++				catch (InterruptedException e)
++				{
++
++				}
++				npc.deleteMe();  
++			});
++		}
++	}
++	
++	private void checkBossInArena()
++	{
++		ArenaZone arenaZone = ZoneManager.getInstance().getZoneById(9900099, ArenaZone.class);
++		if ((arenaZone != null) && (spawnedMainBoss != null))
++		{
++			if (!arenaZone.isInsideZone(spawnedMainBoss))
++			{
++				spawnedMainBoss.teleToLocation(SPAWN_LOCATION, false); 
++			}
++		}
++	}
++	// Modification of reappearance values ​​can cause bug, test before starting
++	private void checkBossHP()
++	{
++		if (spawnedMainBoss != null)
++		{
++			final double currentHP = spawnedMainBoss.getCurrentHp();
++			final int maxHP = spawnedMainBoss.getMaxHp();
++			final int currentHPPercentage = (int) ((currentHP / maxHP) * 100);
++			
++			if ((currentHPPercentage <= 97) && !_spawningClones95)
++			{
++				_spawningClones95 = true;
++				spawnClones95(); 
++			}
++			else if ((currentHPPercentage <= 75) && !_spawningClones75)
++			{
++				_spawningClones75 = true;
++				spawnClones75(); 
++			}
++			else if ((currentHPPercentage <= 50) && !_spawningClones50)
++			{
++				_spawningClones50 = true;
++				spawnClones50();
++			}
++
++			if ((currentHPPercentage <= 94) && !_spawningClonesTemp94)
++			{
++				_spawningClonesTemp94 = true;
++				spawnClonesTemp94(); 
++			}
++			
++			if ((currentHPPercentage <= 78) && _spawningClonesTemp94)
++			{
++				
++				List<Npc> clonesTemp94Copy = new ArrayList<>(_clonesTemp94.keySet());
++				
++				for (Npc clone : clonesTemp94Copy)
++				{
++					if ((clone != null) && !clone.isDead())
++					{
++						clone.deleteMe(); 
++					}
++				}
++
++				_clonesTemp94.clear();
++
++			}
++
++			if ((currentHPPercentage <= 75) && !_spawningClonesTemp75)
++			{
++				_spawningClonesTemp75 = true;
++				spawnClonesTemp75();
++			}
++			else if ((currentHPPercentage <= 42) && !_spawningClonesTemp42)
++			{
++				_spawningClonesTemp42 = true;
++				spawnClonesTemp42();
++			}
++			if ((currentHPPercentage <= 93) && !_spawningSlaves93)
++			{
++				_spawningSlaves93 = true;
++				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 25, 500, 600); 
++			}
++			else if ((currentHPPercentage <= 70) && !_spawningSlaves70)
++			{
++				_spawningSlaves70 = true;
++				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 18, 500, 600); 
++				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 18, 500, 600); 
++			}
++			else if ((currentHPPercentage <= 54) && !_spawningSlaves50)
++			{
++				_spawningSlaves50 = true;
++				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 30, 500, 600); 
++				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 25, 500, 600); 
++				spawnSlavesAroundBoss(SLAVE3_NPC_ID, 25, 500, 600); 
++			}
++			else if ((currentHPPercentage <= 47) && !_spawningSlaves45)
++			{
++				_spawningSlaves45 = true;
++				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 26, 500, 600); 
++				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 26, 500, 600); 
++				spawnSlavesAroundBoss(SLAVE3_NPC_ID, 26, 500, 600); 
++			}
++			else if ((currentHPPercentage <= 37) && !_spawningSlaves40)
++			{
++				_spawningSlaves40 = true;
++				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 22, 500, 600); 
++				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 24, 500, 600); 
++				spawnSlavesAroundBoss(SLAVE3_NPC_ID, 22, 500, 600); 
++			}
++			else if ((currentHPPercentage <= 28) && !_spawningSlaves25)
++			{
++				_spawningSlaves25 = true;
++				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 24, 500, 600); 
++				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 25, 500, 600); 
++				spawnSlavesAroundBoss(SLAVE3_NPC_ID, 24, 500, 600); 
++			}
++			else if ((currentHPPercentage <= 18) && !_spawningSlaves15)
++			{
++				_spawningSlaves15 = true;
++				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 30, 500, 600); 
++				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 25, 500, 600); 
++				spawnSlavesAroundBoss(SLAVE3_NPC_ID, 25, 500, 600); 
++			}
++			else if ((currentHPPercentage <= 10) && !_spawningSlaves5)
++			{
++				_spawningSlaves5 = true;
++				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 25, 500, 600); 
++				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 25, 500, 600); 
++				spawnSlavesAroundBoss(SLAVE3_NPC_ID, 30, 500, 600); 
++			}
++			else if ((currentHPPercentage <= 4) && !_spawningSlaves1)
++			{
++				_spawningSlaves1 = true;
++				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 25, 500, 600); 
++				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 30, 500, 600); 
++				spawnSlavesAroundBoss(SLAVE3_NPC_ID, 30, 500, 600); 
++			}
++		}
++	}
++	
++	private void spawnSlavesAroundBoss(int npcId, int count, int minRadius, int maxRadius)
++	{
++		Location bossLoc = spawnedMainBoss.getLocation();
++		for (int i = 0; i < count; i++)
++		{
++			double angle = (2 * Math.PI * i) / count; 
++			int radius = getRandom(minRadius, maxRadius);
++			int x = bossLoc.getX() + (int) (radius * Math.cos(angle));
++			int y = bossLoc.getY() + (int) (radius * Math.sin(angle));
++			int z = bossLoc.getZ();
++			addSpawn(npcId, new Location(x, y, z));
++		}
++	}
++	
++	private void spawnClonesTemp94()
++	{
++		Location[] cloneLocations94 =
++		{
++			new Location(44331, 155883, -2734),
++			new Location(44465, 155501, -2734),
++			new Location(44836, 155344, -2734)
++		};
++		
++		_clonesTemp94.clear();
++		
++		for (Location loc : cloneLocations94)
++		{
++			Npc clone = addSpawn(CLONESTEMP94_NPC_ID, loc);
++			_clonesTemp94.put(clone, true);
++		}
++	}
++	
++	private void spawnClonesTemp75()
++	{
++		Location[] cloneLocations75 =
++		{
++			new Location(45430, 156351, -2734),
++			new Location(45600, 156007, -2734),
++			new Location(45095, 156548, -2713)
++		};
++		
++		for (Location loc : cloneLocations75)
++		{
++			Npc clone = addSpawn(CLONESTEMP75_NPC_ID, loc);
++			_clonesTemp75.put(clone, true);
++		}
++	}
++	
++	private void spawnClonesTemp42()
++	{
++		Location[] cloneLocations42 =
++		{
++			new Location(44332, 155884, -2734),
++			new Location(44464, 155502, -2734),
++			new Location(44837, 155345, -2734)
++		};
++		
++		for (Location loc : cloneLocations42)
++		{
++			Npc clone = addSpawn(CLONESTEMP42_NPC_ID, loc);
++			_clonesTemp42.put(clone, true);
++		}
++	}
++	
++	private void spawnClones95()
++	{
++		Location[] cloneLocations95 =
++		{
++			new Location(45773, 156665, -2713),
++			new Location(45196, 156999, -2713),
++			new Location(44550, 156926, -2713)
++		};
++		
++		for (Location loc : cloneLocations95)
++		{
++			addSpawn(CLONE_NPC_ID, loc);
++		}
++		
++		spawnedMainBoss.broadcastPacket(new ExShowScreenMessage(NpcStringId.GUILLOTINE_SUMMONS_HIS_CLONE, ExShowScreenMessage.TOP_CENTER, 10000, true)); 
++	}
++	
++	private void spawnClones75()
++	{
++		Location[] cloneLocations75 =
++		{
++			new Location(44731, 154876, -2713),
++			new Location(44135, 155223, -2713),
++			new Location(43868, 155843, -2713),
++			new Location(44027, 156500, -2713)
++		};
++		
++		for (Location loc : cloneLocations75)
++		{
++			addSpawn(CLONE_NPC_ID, loc);
++		}
++		
++		spawnedMainBoss.broadcastPacket(new ExShowScreenMessage(NpcStringId.GUILLOTINE_SUMMONS_HIS_CLONE, ExShowScreenMessage.TOP_CENTER, 10000, true)); 
++	}
++	
++	private void spawnClones50()
++	{
++		Location[] cloneLocations50 =
++		{
++			new Location(46021, 156054, -2712),
++			new Location(45881, 155405, -2712),
++			new Location(45396, 154969, -2712)
++		};
++		
++		for (Location loc : cloneLocations50)
++		{
++			addSpawn(CLONE_NPC_ID, loc);
++		}
++		
++		spawnedMainBoss.broadcastPacket(new ExShowScreenMessage(NpcStringId.GUILLOTINE_SUMMONS_HIS_CLONE, ExShowScreenMessage.TOP_CENTER, 10000, true)); 
++	}
++	
++	public boolean isGuillotineActive()
++	{
++		return spawnedMainBoss != null; 
++	}
++	
++	@Override
++	public String onKill(Npc npc, Player killer, boolean isSummon)
++	{
++		if (npc.getId() == MAIN_BOSS_ID)
++		{
++			cancelQuestTimers("check_arena");
++			
++			for (Npc spawnedNpc : World.getInstance().getVisibleObjects(npc, Npc.class))
++			{
++				if ((spawnedNpc != null) && ((spawnedNpc.getId() == CLONE_NPC_ID) || (spawnedNpc.getId() == SLAVE1_NPC_ID) || (spawnedNpc.getId() == SLAVE2_NPC_ID) || (spawnedNpc.getId() == SLAVE3_NPC_ID) || ((spawnedNpc.getId() == CLONESTEMP94_NPC_ID) && _clonesTemp94.containsKey(spawnedNpc)) || ((spawnedNpc.getId() == CLONESTEMP75_NPC_ID) && _clonesTemp75.containsKey(spawnedNpc)) || ((spawnedNpc.getId() == CLONESTEMP42_NPC_ID) && _clonesTemp42.containsKey(spawnedNpc))))
++				{
++					spawnedNpc.deleteMe(); 
++				}
++			}
++			
++			spawnedMainBoss = null;
++			GlobalVariablesManager.getInstance().set("GUILLOTINE_ALIVE", false);
++			
++			_spawningClones95 = false;
++			_spawningClones75 = false;
++			_spawningClones50 = false; 
++
++			_spawningClonesTemp94 = false;
++			_spawningClonesTemp75 = false;
++			_spawningClonesTemp42 = false;
++		}
++		return super.onKill(npc, killer, isSummon);
++	}
++	
++	public static void main(String[] args)
++	{
++		new Guillotine(); 
++	}
++}
+diff --git a/dist/game/data/spawns/Dion/GuillotineFortressMonsters.xml b/dist/game/data/spawns/Dion/GuillotineFortressMonsters.xml
+index 194289be3c..f2b337eff3 100644
+--- a/dist/game/data/spawns/Dion/GuillotineFortressMonsters.xml
++++ b/dist/game/data/spawns/Dion/GuillotineFortressMonsters.xml
+@@ -406,277 +406,34 @@
+ 		<npc id="24678" count="2" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Schnabel Doctor -->
+ 		<npc id="24679" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Henker Anatomist -->
+ 	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3800" maxZ="-3300" rad="200">
+-				<node x="38183" y="144936" />
+-			</territory>
+-		</territories>
+-		<npc id="24681" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Henker Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3800" maxZ="-3300" rad="200">
+-				<node x="38720" y="148017" />
+-			</territory>
+-		</territories>
+-		<npc id="24681" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Henker Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3800" maxZ="-3300" rad="200">
+-				<node x="41646" y="150323" />
+-			</territory>
+-		</territories>
+-		<npc id="24681" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Henker Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3800" maxZ="-3300" rad="200">
+-				<node x="44005" y="148421" />
+-			</territory>
+-		</territories>
+-		<npc id="24681" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Henker Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3800" maxZ="-3300" rad="200">
+-				<node x="42848" y="149284" />
+-			</territory>
+-		</territories>
+-		<npc id="24681" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Henker Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3700" maxZ="-3200" rad="200">
+-				<node x="46855" y="149069" />
+-			</territory>
+-		</territories>
+-		<npc id="24681" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Henker Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3600" maxZ="-3100" rad="200">
+-				<node x="50349" y="148240" />
+-			</territory>
+-		</territories>
+-		<npc id="24681" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Henker Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3700" maxZ="-3200" rad="200">
+-				<node x="45516" y="145055" />
+-			</territory>
+-		</territories>
+-		<npc id="24681" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Henker Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3600" maxZ="-3100" rad="200">
+-				<node x="51628" y="154166" />
+-			</territory>
+-		</territories>
+-		<npc id="24681" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Henker Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-2800" maxZ="-2300" rad="200">
+-				<node x="44837" y="151532" />
+-			</territory>
+-		</territories>
+-		<npc id="24681" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Henker Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-2500" maxZ="-2000" rad="200">
+-				<node x="50832" y="149012" />
+-			</territory>
+-		</territories>
+-		<npc id="24681" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Henker Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-2500" maxZ="-2000" rad="200">
+-				<node x="53206" y="149431" />
+-			</territory>
+-		</territories>
+-		<npc id="24681" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Henker Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3100" maxZ="-2600" rad="200">
+-				<node x="54309" y="145235" />
+-			</territory>
+-		</territories>
+-		<npc id="24681" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Henker Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-2900" maxZ="-2400" rad="200">
+-				<node x="54597" y="142354" />
+-			</territory>
+-		</territories>
+-		<npc id="24681" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Henker Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-2700" maxZ="-2200" rad="200">
+-				<node x="54611" y="139592" />
+-			</territory>
+-		</territories>
+-		<npc id="24681" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Henker Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3200" maxZ="-2700" rad="200">
+-				<node x="46433" y="143077" />
+-			</territory>
+-		</territories>
+-		<npc id="24681" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Henker Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3100" maxZ="-2600" rad="200">
+-				<node x="40405" y="141208" />
+-			</territory>
+-		</territories>
+-		<npc id="24681" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Henker Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3100" maxZ="-2600" rad="200">
+-				<node x="41204" y="137714" />
+-			</territory>
+-		</territories>
+-		<npc id="24681" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Henker Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3700" maxZ="-3200" rad="200">
+-				<node x="41741" y="145742" />
+-			</territory>
+-		</territories>
+-		<npc id="24680" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Schnabel Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3700" maxZ="-3200" rad="200">
+-				<node x="40708" y="148011" />
+-			</territory>
+-		</territories>
+-		<npc id="24680" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Schnabel Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3700" maxZ="-3200" rad="200">
+-				<node x="37535" y="150378" />
+-			</territory>
+-		</territories>
+-		<npc id="24680" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Schnabel Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3600" maxZ="-3100" rad="200">
+-				<node x="42499" y="151573" />
+-			</territory>
+-		</territories>
+-		<npc id="24680" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Schnabel Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3600" maxZ="-3100" rad="200">
+-				<node x="48863" y="145899" />
+-			</territory>
+-		</territories>
+-		<npc id="24680" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Schnabel Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3600" maxZ="-3100" rad="200">
+-				<node x="47132" y="146028" />
+-			</territory>
+-		</territories>
+-		<npc id="24680" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Schnabel Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3700" maxZ="-3200" rad="200">
+-				<node x="49689" y="143209" />
+-			</territory>
+-		</territories>
+-		<npc id="24680" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Schnabel Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3600" maxZ="-3100" rad="200">
+-				<node x="50136" y="151615" />
+-			</territory>
+-		</territories>
+-		<npc id="24680" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Schnabel Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-2800" maxZ="-2300" rad="200">
+-				<node x="48113" y="152913" />
+-			</territory>
+-		</territories>
+-		<npc id="24680" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Schnabel Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-2500" maxZ="-2000" rad="200">
+-				<node x="53216" y="151444" />
+-			</territory>
+-		</territories>
+-		<npc id="24680" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Schnabel Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-2600" maxZ="-2100" rad="200">
+-				<node x="56047" y="152984" />
+-			</territory>
+-		</territories>
+-		<npc id="24680" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Schnabel Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3100" maxZ="-2600" rad="200">
+-				<node x="56067" y="146283" />
+-			</territory>
+-		</territories>
+-		<npc id="24680" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Schnabel Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-2900" maxZ="-2400" rad="200">
+-				<node x="51561" y="145515" />
+-			</territory>
+-		</territories>
+-		<npc id="24680" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Schnabel Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3100" maxZ="-2600" rad="200">
+-				<node x="53208" y="143834" />
+-			</territory>
+-		</territories>
+-		<npc id="24680" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Schnabel Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3100" maxZ="-2600" rad="200">
+-				<node x="44586" y="141747" />
+-			</territory>
+-		</territories>
+-		<npc id="24680" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Schnabel Inspector -->
+-	</spawn>
+-	<spawn>
+-		<territories>
+-			<territory name="execution_grounds" shape="Cylinder" minZ="-3200" maxZ="-2700" rad="200">
+-				<node x="42404" y="145264" />
+-			</territory>
+-		</territories>
+-		<npc id="24680" count="1" respawnTime="10sec" respawnRandom="0sec" chaseRange="1200" /> <!-- Schnabel Inspector -->
++	<spawn name="ExecutionGroundsDefender">
++			<npc id="24681" x="45433" y="144984" z="-3640" heading="35974" respawnTime="60sec" /> <!-- Henker Inspector - Execution Grounds Defender -->
++			<npc id="24681" x="44089" y="148253" z="-3696" heading="28883" respawnTime="60sec" /> <!-- Henker Inspector - Execution Grounds Defender -->
++			<npc id="24680" x="50231" y="148391" z="-3536" heading="7995" respawnTime="60sec" /> <!-- Schnabel Inspector - Execution Grounds Defender -->
++			<npc id="24680" x="46980" y="149138" z="-3696" heading="27731" respawnTime="60sec" /> <!-- Schnabel Inspector - Execution Grounds Defender -->
++			<npc id="24680" x="49707" y="143397" z="-3600" heading="54876" respawnTime="60sec" /> <!-- Schnabel Inspector - Execution Grounds Defender -->
++			<npc id="24680" x="41184" y="137712" z="-3032" heading="42770" respawnTime="60sec" /> <!-- Schnabel Inspector - Execution Grounds Defender -->
++			<npc id="24681" x="46598" y="142967" z="-3104" heading="29182" respawnTime="60sec" /> <!-- Henker Inspector - Execution Grounds Defender -->
++			<npc id="24680" x="42397" y="145281" z="-3120" heading="53237" respawnTime="60sec" /> <!-- Schnabel Inspector - Execution Grounds Defender -->
++			<npc id="24681" x="40255" y="141209" z="-3032" heading="42775" respawnTime="60sec" /> <!-- Henker Inspector - Execution Grounds Defender -->
++			<npc id="24680" x="53337" y="143712" z="-2984" heading="3384" respawnTime="60sec" /> <!-- Schnabel Inspector - Execution Grounds Defender -->
++			<npc id="24681" x="54585" y="142171" z="-2840" heading="25021" respawnTime="60sec" /> <!-- Henker Inspector - Execution Grounds Defender -->
++			<npc id="24681" x="54636" y="139497" z="-2600" heading="50070" respawnTime="60sec" /> <!-- Henker Inspector - Execution Grounds Defender -->
++			<npc id="24681" x="54368" y="145396" z="-3080" heading="18421" respawnTime="60sec" /> <!-- Henker Inspector - Execution Grounds Defender -->
++			<npc id="24680" x="56103" y="146179" z="-2976" heading="5880" respawnTime="60sec" /> <!-- Schnabel Inspector - Execution Grounds Defender -->
++			<npc id="24681" x="53305" y="149555" z="-2472" heading="24575" respawnTime="60sec" /> <!-- Henker Inspector - Execution Grounds Defender -->
++			<npc id="24680" x="53384" y="151336" z="-2488" heading="16962" respawnTime="60sec" /> <!-- Schnabel Inspector - Execution Grounds Defender -->
++			<npc id="24680" x="55932" y="153105" z="-2448" heading="7334" respawnTime="60sec" /> <!-- Schnabel Inspector - Execution Grounds Defender -->
++			<npc id="24680" x="48252" y="152932" z="-2720" heading="37038" respawnTime="60sec" /> <!-- Schnabel Inspector - Execution Grounds Defender -->
++			<npc id="24681" x="44732" y="151669" z="-2768" heading="39230" respawnTime="60sec" /> <!-- Henker Inspector - Execution Grounds Defender -->
++			<npc id="24680" x="40747" y="147998" z="-3697" heading="31233" respawnTime="60sec" /> <!-- Schnabel Inspector - Execution Grounds Defender -->
++			<npc id="24680" x="37445" y="150442" z="-3648" heading="13665" respawnTime="60sec" /> <!-- Schnabel Inspector - Execution Grounds Defender -->
++			<npc id="24681" x="42747" y="149311" z="-3699" heading="22251" respawnTime="60sec" /> <!-- Henker Inspector - Execution Grounds Defender -->
++			<npc id="24681" x="48802" y="145915" z="-3585" heading="60043" respawnTime="60sec" /> <!-- Henker Inspector - Execution Grounds Defender -->
++			<npc id="24681" x="41615" y="150182" z="-3735" heading="34305" respawnTime="60sec" /> <!-- Henker Inspector - Execution Grounds Defender -->
++			<npc id="24681" x="38524" y="147991" z="-3704" heading="32873" respawnTime="60sec" /> <!-- Henker Inspector - Execution Grounds Defender -->
++			<npc id="24680" x="41686" y="145672" z="-3670" heading="37919" respawnTime="60sec" /> <!-- Schnabel Inspector - Execution Grounds Defender -->
++			<npc id="24680" x="47099" y="146081" z="-3587" heading="34677" respawnTime="60sec" /> <!-- Schnabel Inspector - Execution Grounds Defender -->
+ 	</spawn>
+ 	<spawn>
+ 		<territories>
+diff --git a/dist/game/data/stats/npcs/24600-24699.xml b/dist/game/data/stats/npcs/24600-24699.xml
+index 686520e53b..685349acf6 100644
+--- a/dist/game/data/stats/npcs/24600-24699.xml
++++ b/dist/game/data/stats/npcs/24600-24699.xml
+@@ -5541,6 +5541,7 @@
+ 			<skill id="34475" level="1" /> <!-- Night in the Execution Grounds -->
+ 			<skill id="14818" level="1" /> <!-- Instant Kill Resistance -->
+ 			<skill id="16547" level="10" /> <!-- Danger Zone Resistance -->
++			<skill id="34478" level="1" /> <!-- Death Attack -->
+ 		</skillList>
+ 		<dropLists>
+ 			<drop>
+@@ -5659,6 +5660,7 @@
+ 			<skill id="34475" level="1" /> <!-- Night in the Execution Grounds -->
+ 			<skill id="14818" level="1" /> <!-- Instant Kill Resistance -->
+ 			<skill id="16547" level="10" /> <!-- Danger Zone Resistance -->
++			<skill id="34478" level="1" /> <!-- Death Attack -->
+ 		</skillList>
+ 		<dropLists>
+ 			<drop>
+@@ -5777,6 +5779,7 @@
+ 			<skill id="34475" level="1" /> <!-- Night in the Execution Grounds -->
+ 			<skill id="14818" level="1" /> <!-- Instant Kill Resistance -->
+ 			<skill id="16547" level="10" /> <!-- Danger Zone Resistance -->
++			<skill id="34478" level="1" /> <!-- Death Attack -->
+ 		</skillList>
+ 		<dropLists>
+ 			<drop>
+@@ -5895,6 +5898,8 @@
+ 			<skill id="34475" level="1" /> <!-- Night in the Execution Grounds -->
+ 			<skill id="14818" level="1" /> <!-- Instant Kill Resistance -->
+ 			<skill id="16547" level="10" /> <!-- Danger Zone Resistance -->
++			<skill id="34508" level="1" /> <!-- Death Stalker's Attack -->
++			<skill id="34509" level="1" /> <!-- Death Stalker's Slash -->
+ 		</skillList>
+ 		<dropLists>
+ 			<drop>
+@@ -5988,7 +5993,7 @@
+ 		<acquire exp="1470160" sp="1323" />
+ 		<stats str="88" int="79" dex="55" wit="78" con="82" men="78">
+ 			<vitals hp="5838786" hpRegen="13.4" mp="3190" mpRegen="30" />
+-			<attack physical="753514.268097518" magical="1743.76790583647" random="50" critical="4.75" accuracy="9" attackSpeed="253" type="SWORD" range="40" distance="80" width="120" />
++			<attack physical="753514.268097518" magical="1743.76790583647" random="50" critical="4.75" accuracy="9" attackSpeed="253" type="SWORD" range="100" distance="80" width="120" />
+ 			<defence physical="6057.47663551402" magical="2350.44514357978" />
+ 			<attribute>
+ 				<defence fire="1260" water="1260" wind="1260" earth="1260" holy="1260" dark="1260" />
+@@ -6015,6 +6020,8 @@
+ 			<skill id="14818" level="1" /> <!-- Instant Kill Resistance -->
+ 			<skill id="16547" level="10" /> <!-- Danger Zone Resistance -->
+ 			<skill id="5599" level="12" /> <!-- Confusion Resistance -->
++			<skill id="34510" level="1" /> <!-- Death Butcher's Attack -->
++			<skill id="34511" level="1" /> <!-- Death Butcher's Slash -->
+ 		</skillList>
+ 		<dropLists>
+ 			<drop>
+@@ -6134,6 +6141,7 @@
+ 			<skill id="14818" level="1" /> <!-- Instant Kill Resistance -->
+ 			<skill id="16547" level="10" /> <!-- Danger Zone Resistance -->
+ 			<skill id="5599" level="12" /> <!-- Confusion Resistance -->
++			<skill id="34477" level="1" /> <!-- Death Doctor's Explosion -->
+ 		</skillList>
+ 		<dropLists>
+ 			<drop>
+@@ -6253,6 +6261,8 @@
+ 			<skill id="14818" level="1" /> <!-- Instant Kill Resistance -->
+ 			<skill id="16547" level="10" /> <!-- Danger Zone Resistance -->
+ 			<skill id="5599" level="12" /> <!-- Confusion Resistance -->
++			<skill id="34506" level="1" /> <!-- Death Dissector's Thorn -->
++			<skill id="34507" level="1" /> <!-- Death Dissector's Explosion -->
+ 		</skillList>
+ 		<dropLists>
+ 			<drop>
+@@ -6354,12 +6364,12 @@
+ 			<abnormalResist physical="10" magical="10" />
+ 			<speed>
+ 				<walk ground="90" />
+-				<run ground="270" />
++				<run ground="253" />
+ 			</speed>
+ 			<hitTime>600</hitTime>
+ 		</stats>
+-		<status attackable="true" />
+-		<ai type="FIGHTER" aggroRange="300" isAggressive="true" />
++		<status attackable="true" canMove="false" targetable="false" />
++		<ai type="FIGHTER" aggroRange="600" isAggressive="true" />
+ 		<collision>
+ 			<radius normal="20" />
+ 			<height normal="67" />
+@@ -6381,7 +6391,7 @@
+ 		<equipment rhand="82656" /> <!-- Only_for_NPC_Execution_Grounds_Range -->
+ 		<stats str="88" int="79" dex="55" wit="78" con="82" men="78">
+ 			<vitals hp="5838786" hpRegen="13.4" mp="3190" mpRegen="30" />
+-			<attack physical="1599215" magical="145753" random="10" critical="4" accuracy="5" attackSpeed="253" type="SWORD" range="40" distance="80" width="120" />
++			<attack physical="1599215" magical="145753" random="10" critical="4" accuracy="5" attackSpeed="253" type="SWORD" range="400" distance="80" width="120" />
+ 			<defence physical="753240" magical="364523" />
+ 			<attribute>
+ 				<defence fire="1260" water="1260" wind="1260" earth="1260" holy="1260" dark="1260" />
+@@ -6390,12 +6400,12 @@
+ 			<abnormalResist physical="10" magical="10" />
+ 			<speed>
+ 				<walk ground="62" />
+-				<run ground="240" />
++				<run ground="253" />
+ 			</speed>
+ 			<hitTime>600</hitTime>
+ 		</stats>
+-		<status attackable="true" />
+-		<ai type="FIGHTER" aggroRange="300" isAggressive="true" />
++		<status attackable="false" canMove="false" targetable="false" />
++		<ai type="FIGHTER" aggroRange="600" isAggressive="true" />
+ 		<collision>
+ 			<radius normal="28" />
+ 			<height normal="65" />
+@@ -6412,20 +6422,26 @@
+ 		</skillList>
+ 	</npc>
+ 	<npc id="24682" level="126" type="Monster" name="Frail Zombie" title="Execution Grounds Defender">
++		<parameters>
++			<skill name="Skill01_ID" id="34480" level="1" />
++		</parameters>
+ 		<race>UNDEAD</race>
+ 		<sex>MALE</sex>
+ 		<stats str="88" int="79" dex="55" wit="78" con="82" men="78">
+ 			<vitals hp="5838786" hpRegen="13.4" mp="3190" mpRegen="30" />
+ 			<attack physical="1599215" magical="145753" random="10" critical="4" accuracy="5" attackSpeed="253" type="SWORD" range="40" distance="80" width="120" />
+ 			<defence physical="753240" magical="364523" />
++			<attribute>
++				<defence fire="2350" water="2350" wind="2350" earth="2350" holy="2350" dark="2350" />
++				<attack type="DARK" value="2200" />
++			</attribute>
+ 			<speed>
+ 				<walk ground="10" />
+-				<run ground="10" />
++				<run ground="253" />
+ 			</speed>
+-			<hitTime>600</hitTime>
++			<hitTime>800</hitTime>
+ 		</stats>
+-		<status attackable="true" />
+-		<ai type="FIGHTER" aggroRange="300" isAggressive="true" />
++		<status attackable="true" canMove="false" targetable="false" />
+ 		<collision>
+ 			<radius normal="30" />
+ 			<height normal="97" />
+@@ -6439,7 +6455,13 @@
+ 			<skill id="14823" level="1" /> <!-- Instant Kill Resistance -->
+ 			<skill id="16547" level="10" /> <!-- Danger Zone Resistance -->
+ 			<skill id="5599" level="12" /> <!-- Confusion Resistance -->
++			<skill id="34480" level="1" /> <!-- Death Guardian's Thorn -->
+ 		</skillList>
++		<ai type="MAGE" aggroRange="1100" isAggressive="true" clanHelpRange="1100" >
++			<clanList>
++				<clan>GUILLOTINE</clan>
++			</clanList>
++		</ai>
+ 	</npc>
+ 	<npc id="24683" level="125" type="Monster" name="Renard Flam">
+ 		<!-- AUTO GENERATED NPC TODO: FIX IT -->
+diff --git a/dist/game/data/stats/npcs/29400-29499.xml b/dist/game/data/stats/npcs/29400-29499.xml
+index 788592d948..da6db140e0 100644
+--- a/dist/game/data/stats/npcs/29400-29499.xml
++++ b/dist/game/data/stats/npcs/29400-29499.xml
+@@ -51,21 +51,29 @@
+ 		</skillList>
+ 	</npc>
+ 	<npc id="29402" level="127" type="RaidBoss" name="Guillotine" title="Execution Grounds' Watchman">
+-		<!-- AUTO GENERATED NPC TODO: FIX IT -->
++			<parameters>
++			<skill name="Skill01_ID" id="34458" level="1" />
++			<skill name="Skill02_ID" id="34460" level="1" />
++			<skill name="Skill03_ID" id="34461" level="1" />
++		</parameters>
+ 		<race>UNDEAD</race>
+ 		<sex>MALE</sex>
+ 		<acquire exp="5337882368" sp="4804094" />
+ 		<stats str="164" int="188" dex="55" wit="78" con="111" men="149">
+ 			<vitals hp="800175145" hpRegen="13.4" mp="68076" mpRegen="30" />
+-			<attack physical="639686" magical="583012" random="10" critical="4" accuracy="5" attackSpeed="253" type="SWORD" range="40" distance="80" width="120" />
++			<attack physical="639686" magical="583012" random="10" critical="4" accuracy="5" attackSpeed="253" type="SWORD" range="100" distance="80" width="120" />
+ 			<defence physical="301296" magical="1458092" />
+ 			<speed>
+ 				<walk ground="90" />
+-				<run ground="300" />
++				<run ground="253" />
+ 			</speed>
+ 			<hitTime>600</hitTime>
++			<attribute>
++				<defence fire="2650" water="2650" wind="2650" earth="2650" holy="2600" dark="2650" />
++				<attack type="DARK" value="2550" />
++			</attribute>
+ 		</stats>
+-		<status attackable="true" />
++		<status attackable="true" canMove="false" />
+ 		<collision>
+ 			<radius normal="60" />
+ 			<height normal="124.5" />
+@@ -77,7 +85,15 @@
+ 			<skill id="32909" level="1" /> <!-- Rule of Looting -->
+ 			<skill id="32675" level="1" /> <!-- Improved Immunity -->
+ 			<skill id="14804" level="10" /> <!-- Damage Reflection Resistance -->
++			<skill id="34458" level="1" /> <!-- Vicious Killing Strike -->
++			<skill id="34460" level="1" /> <!-- Fatal Slash -->
++			<skill id="34461" level="1" /> <!-- Soul Decay -->
+ 		</skillList>
++		<ai type="MAGE" aggroRange="1500" isAggressive="false" clanHelpRange="1000" >
++			<clanList>
++				<clan>GUILLOTINE</clan>
++			</clanList>
++		</ai>
+ 		<dropLists>
+ 			<drop>
+ 				<item id="46449" min="1" max="1" chance="15.5" /> <!-- Kain's Soul Crystal Lv. 6 - Weapon -->
+@@ -144,8 +160,11 @@
+ 			</drop>
+ 		</dropLists>
+ 	</npc>
+-	<npc id="29403" level="127" type="Monster" name="Guillotine's Clone">
+-		<!-- AUTO GENERATED NPC TODO: FIX IT -->
++	<npc id="29403" level="127" type="Monster" name="Guillotine's Clone" >
++		<parameters>
++			<skill name="Skill02_ID" id="34462" level="1" />
++			<skill name="Skill01_ID" id="34463" level="1" />
++		</parameters>
+ 		<race>UNDEAD</race>
+ 		<sex>MALE</sex>
+ 		<stats str="88" int="79" dex="55" wit="78" con="82" men="78">
+@@ -154,11 +173,15 @@
+ 			<defence physical="150648" magical="729046" />
+ 			<speed>
+ 				<walk ground="80" />
+-				<run ground="205" />
++				<run ground="253" />
+ 			</speed>
+ 			<hitTime>600</hitTime>
++			<attribute>
++				<defence fire="2500" water="2500" wind="2500" earth="2500" holy="2450" dark="2500" />
++				<attack type="DARK" value="2350" />
++			</attribute>
+ 		</stats>
+-		<status attackable="true" />
++		<status attackable="true" undying="true" canMove="false" targetable="false" />
+ 		<collision>
+ 			<radius normal="23" />
+ 			<height normal="64" />
+@@ -169,67 +192,107 @@
+ 			<skill id="14765" level="3" /> <!-- Vampiric Rage Resistance -->
+ 			<skill id="32675" level="1" /> <!-- Improved Immunity -->
+ 			<skill id="14804" level="10" /> <!-- Damage Reflection Resistance -->
++			<skill id="34462" level="1" /> <!-- Fatal Slash -->
++			<skill id="34463" level="1" /> <!-- Soul Decay -->			
+ 		</skillList>
++			<ai type="MAGE" aggroRange="1500" isAggressive="true" clanHelpRange="1500" >
++			<clanList>
++				<clan>GUILLOTINE</clan>
++			</clanList>
++		</ai>
+ 	</npc>
+ 	<npc id="29404" level="127" type="Monster" name="Guillotine's Slave">
+-		<!-- AUTO GENERATED NPC TODO: FIX IT -->
+ 		<race>ETC</race>
+ 		<sex>MALE</sex>
+ 		<stats str="88" int="79" dex="55" wit="78" con="82" men="78">
+ 			<vitals hp="2207481" hpRegen="13.4" mp="3190" mpRegen="30" />
+ 			<attack physical="319843" magical="291506" random="10" critical="4" accuracy="5" attackSpeed="253" type="SWORD" range="40" distance="80" width="120" />
+-			<defence physical="150648" magical="729046" />
++			<defence physical="5500" magical="3600" />
+ 			<speed>
+ 				<walk ground="17" />
+ 				<run ground="110" />
+ 			</speed>
+ 			<hitTime>600</hitTime>
++			<attribute>
++				<defence fire="2500" water="2500" wind="2500" earth="2500" holy="2450" dark="2500" />
++				<attack type="DARK" value="2350" />
++			</attribute>
+ 		</stats>
+-		<status attackable="true" />
++		<status attackable="false" undying="true" targetable="true" />
+ 		<collision>
+ 			<radius normal="11" />
+ 			<height normal="25" />
+ 		</collision>
++		<skillList>
++			<skill id="4416" level="1" /> <!-- Undead -->			
++		</skillList>
++		<ai type="BALANCED" aggroRange="40" isAggressive="false" clanHelpRange="50" >
++			<clanList>
++				<clan>GUILLOTINE</clan>
++			</clanList>
++		</ai>
+ 	</npc>
+ 	<npc id="29405" level="127" type="Monster" name="Guillotine's Slave">
+-		<!-- AUTO GENERATED NPC TODO: FIX IT -->
+ 		<race>ETC</race>
+ 		<sex>MALE</sex>
+ 		<stats str="88" int="79" dex="55" wit="78" con="82" men="78">
+ 			<vitals hp="2207481" hpRegen="13.4" mp="3190" mpRegen="30" />
+ 			<attack physical="319843" magical="291506" random="10" critical="4" accuracy="5" attackSpeed="253" type="SWORD" range="40" distance="80" width="120" />
+-			<defence physical="150648" magical="729046" />
++			<defence physical="5500" magical="3600" />
+ 			<speed>
+ 				<walk ground="23" />
+ 				<run ground="80" />
+ 			</speed>
+ 			<hitTime>600</hitTime>
++			<attribute>
++				<defence fire="2500" water="2500" wind="2500" earth="2500" holy="2450" dark="2500" />
++				<attack type="DARK" value="2350" />
++			</attribute>
+ 		</stats>
+-		<status attackable="true" />
++		<status attackable="false" undying="true" targetable="true" />
+ 		<collision>
+ 			<radius normal="7" />
+ 			<height normal="20" />
+ 		</collision>
++		<skillList>
++			<skill id="4416" level="1" /> <!-- Undead -->			
++		</skillList>
++		<ai type="BALANCED" aggroRange="40" isAggressive="false" clanHelpRange="50" >
++			<clanList>
++				<clan>GUILLOTINE</clan>
++			</clanList>
++		</ai>
+ 	</npc>
+ 	<npc id="29406" level="127" type="Monster" name="Guillotine's Slave">
+-		<!-- AUTO GENERATED NPC TODO: FIX IT -->
+ 		<race>ETC</race>
+ 		<sex>MALE</sex>
+ 		<stats str="88" int="79" dex="55" wit="78" con="82" men="78">
+ 			<vitals hp="2207481" hpRegen="13.4" mp="3190" mpRegen="30" />
+ 			<attack physical="319843" magical="291506" random="10" critical="4" accuracy="5" attackSpeed="253" type="SWORD" range="40" distance="80" width="120" />
+-			<defence physical="150648" magical="729046" />
++			<defence physical="5500" magical="3600" />
+ 			<speed>
+ 				<walk ground="17" />
+ 				<run ground="60" />
+ 			</speed>
+ 			<hitTime>600</hitTime>
++			<attribute>
++				<defence fire="2500" water="2500" wind="2500" earth="2500" holy="2450" dark="2500" />
++				<attack type="DARK" value="2350" />
++			</attribute>
+ 		</stats>
+-		<status attackable="true" />
++		<status attackable="false" undying="true" targetable="true" />
+ 		<collision>
+ 			<radius normal="8" />
+ 			<height normal="16" />
+ 		</collision>
++		<skillList>
++			<skill id="4416" level="1" /> <!-- Undead -->			
++		</skillList>
++		<ai type="BALANCED" aggroRange="40" isAggressive="false" clanHelpRange="50" >
++			<clanList>
++				<clan>GUILLOTINE</clan>
++			</clanList>
++		</ai>
+ 	</npc>
+ 	<npc id="29407" level="125" type="RaidBoss" name="Baylor" title="Warden">
+ 		<!-- AUTO GENERATED NPC TODO: FIX IT -->
+diff --git a/dist/game/data/stats/skills/34400-34499.xml b/dist/game/data/stats/skills/34400-34499.xml
+index 6fda80b1ad..4aacd809f1 100644
+--- a/dist/game/data/stats/skills/34400-34499.xml
++++ b/dist/game/data/stats/skills/34400-34499.xml
+@@ -745,21 +745,117 @@
+ 		<!-- A basic melee magic attack from Shnabels in the Execution Grounds. -->
+ 		<icon>icon.skill1417</icon>
+ 		<operateType>A1</operateType>
++		<reuseDelay>6000</reuseDelay>
++		<magicLevel>116</magicLevel>
++		<castRange>40</castRange>
++		<effectRange>1400</effectRange>
++		<hitTime>1200</hitTime>
++		<coolTime>300</coolTime>
++		<attributeType>DARK</attributeType>
++		<attributeValue>500</attributeValue>
++		<effectPoint>-712</effectPoint>
++		<magicCriticalRate>25</magicCriticalRate>
++		<isMagic>1</isMagic>
++		<targetType>ENEMY</targetType>
++		<affectScope>SINGLE</affectScope>
++		<attributeType>DARK</attributeType>
++		<attributeValue>100</attributeValue>
++		<effects>
++			<effect name="MagicalAttack">
++				<power>700</power>
++				<ignoreShieldDefence>true</ignoreShieldDefence>
++				<overHit>true</overHit>
++			</effect>
++		</effects>
+ 	</skill>
+ 	<skill id="34477" toLevel="1" name="Death Doctor's Explosion">
+ 		<!-- A basic range magic attack from Shnabels in the Execution Grounds. -->
+ 		<icon>icon.skill0000</icon>
+ 		<operateType>A1</operateType>
++		<reuseDelay>10000</reuseDelay>
++		<magicLevel>116</magicLevel>
++		<basicProperty>PHYSICAL</basicProperty>
++		<castRange>300</castRange>
++		<hitTime>800</hitTime>
++		<coolTime>300</coolTime>
++		<effectPoint>-350</effectPoint>
++		<magicCriticalRate>-5</magicCriticalRate>
++		<hitCancelTime>0</hitCancelTime>
++		<magicLevel>97</magicLevel>
++		<affectRange>350</affectRange>
++		<isMagic>1</isMagic>
++		<targetType>SELF</targetType>
++		<affectScope>POINT_BLANK</affectScope>
++		<affectObject>NOT_FRIEND</affectObject>
++		<attributeValue>100</attributeValue>
++		<effects>
++			<effect name="MagicalAttack">
++				<power>700</power>
++				<ignoreShieldDefence>true</ignoreShieldDefence>
++				<overHit>true</overHit>
++			</effect>
++		</effects>	
++	</skill>
+ 	</skill>
+ 	<skill id="34478" toLevel="1" name="Death Attack">
+ 		<!-- A basic physical attack from Zombies in the Execution Grounds. -->
+ 		<icon>icon.skill0325</icon>
+ 		<operateType>A1</operateType>
++		<reuseDelay>6000</reuseDelay>
++		<magicLevel>116</magicLevel>
++		<castRange>40</castRange>
++		<effectRange>1400</effectRange>
++		<hitTime>1200</hitTime>
++		<coolTime>300</coolTime>
++		<attributeType>DARK</attributeType>
++		<attributeValue>500</attributeValue>
++		<effectPoint>-712</effectPoint>
++		<magicCriticalRate>25</magicCriticalRate>
++		<isMagic>1</isMagic>
++		<targetType>ENEMY</targetType>
++		<affectScope>SINGLE</affectScope>
++		<attributeType>DARK</attributeType>
++		<attributeValue>100</attributeValue>
++		<effects>
++			<effect name="MagicalAttack">
++				<power>700</power>
++				<ignoreShieldDefence>true</ignoreShieldDefence>
++				<overHit>true</overHit>
++			</effect>
++		</effects>
+ 	</skill>
+ 	<skill id="34480" toLevel="1" name="Death Guardian's Thorn">
+ 		<!-- A magic attack from Protector in the Execution Grounds. -->
+ 		<icon>icon.skill1417</icon>
+ 		<operateType>A1</operateType>
++		<reuseDelay>3000</reuseDelay>
++		<magicLevel>116</magicLevel>
++		<castRange>1100</castRange>
++		<effectRange>1400</effectRange>
++		<hitTime>1400</hitTime>
++		<coolTime>300</coolTime>
++		<attributeType>DARK</attributeType>
++		<attributeValue>1000</attributeValue>
++		<effectPoint>-712</effectPoint>
++		<nextAction>CAST</nextAction>
++		<magicCriticalRate>50</magicCriticalRate>
++		<isMagic>1</isMagic>
++		<targetType>ENEMY</targetType>
++		<affectScope>SINGLE</affectScope>
++		<attributeType>DARK</attributeType>
++		<attributeValue>100</attributeValue>
++		<effects>
++			<effect name="MagicalAttack">
++				<power>
++					<value level="1">6536</value>
++					<value level="2">8128</value>
++					<value level="3">8542</value>
++					<value fromLevel="3" toLevel="3" fromSubLevel="1001" toSubLevel="1020">{base + (base / 100 * subIndex)}</value>
++				</power>
++				<ignoreShieldDefence>true</ignoreShieldDefence>
++				<overHit>true</overHit>
++			</effect>
++		</effects>
+ 	</skill>
+ 	<skill id="34481" toLevel="1" name="Fire Source">
+ 		<!-- You feel the power of the Fire Source. For 4 h., P./ M. Atk. +5%.The effect remains after death, after switching to a dual class or entering instance zones. Removed when entering the Olympiad or the Ceremony of Chaos. -->
+diff --git a/dist/game/data/stats/skills/34500-34599.xml b/dist/game/data/stats/skills/34500-34599.xml
+index 7d77e426c8..4232ca3b83 100644
+--- a/dist/game/data/stats/skills/34500-34599.xml
++++ b/dist/game/data/stats/skills/34500-34599.xml
+@@ -313,31 +313,149 @@
+ 		<!-- A basic melee magic attack from Henkers in the Execution Grounds. -->
+ 		<icon>icon.skill1417</icon>
+ 		<operateType>A1</operateType>
++		<reuseDelay>10000</reuseDelay>
++		<magicLevel>116</magicLevel>
++		<magicCriticalRate>-5</magicCriticalRate>
++		<castRange>200</castRange>
++		<effectRange>150</effectRange>
++		<hitTime>800</hitTime>
++		<coolTime>300</coolTime>
++		<effectPoint>-111</effectPoint>
++		<attributeType>DARK</attributeType>
++		<attributeValue>500</attributeValue>
++		<effectPoint>-150</effectPoint>
++		<magicCriticalRate>45</magicCriticalRate>
++		<targetType>ENEMY</targetType>
++		<affectScope>SINGLE</affectScope>
++		<effects>
++			<effect name="MagicalAttack">
++				<power>25000</power>
++			</effect>
++		</effects>
+ 	</skill>
+ 	<skill id="34507" toLevel="1" name="Death Dissector's Explosion">
+ 		<!-- A basic range magic attack from Henkers in the Execution Grounds. -->
+ 		<icon>icon.skill0000</icon>
+ 		<operateType>A1</operateType>
++		<reuseDelay>10000</reuseDelay>
++		<magicLevel>116</magicLevel>
++		<castRange>250</castRange>
++		<hitTime>800</hitTime>
++		<coolTime>300</coolTime>
++		<effectPoint>-100</effectPoint>
++		<magicCriticalRate>-5</magicCriticalRate>
++		<hitCancelTime>0</hitCancelTime>
++		<magicLevel>97</magicLevel>
++		<affectRange>150</affectRange>
++		<mpConsume>119</mpConsume>
++		<targetType>SELF</targetType>
++		<affectScope>POINT_BLANK</affectScope>
++		<affectObject>NOT_FRIEND</affectObject>
++		<effects>
++			<effect name="MagicalAttack">
++				<power>25000</power>
++			</effect>
++		</effects>
+ 	</skill>
+ 	<skill id="34508" toLevel="1" name="Death Stalker's Attack">
+ 		<!-- A basic physical attack from Shnabels in the Execution Grounds. -->
+ 		<icon>icon.skill0325</icon>
+ 		<operateType>A1</operateType>
++		<reuseDelay>10000</reuseDelay>
++		<magicLevel>116</magicLevel>
++		<basicProperty>PHYSICAL</basicProperty>
++		<magicCriticalRate>-5</magicCriticalRate>
++		<castRange>200</castRange>
++		<effectRange>150</effectRange>
++		<hitTime>800</hitTime>
++		<coolTime>300</coolTime>
++		<effectPoint>-111</effectPoint>
++		<attributeType>DARK</attributeType>
++		<attributeValue>500</attributeValue>
++		<effectPoint>-150</effectPoint>
++		<magicCriticalRate>45</magicCriticalRate>
++		<targetType>ENEMY</targetType>
++		<affectScope>SINGLE</affectScope>
++		<effects>
++			<effect name="PhysicalAttack">
++				<power>50000</power>
++			</effect>
++		</effects>
+ 	</skill>
+ 	<skill id="34509" toLevel="1" name="Death Stalker's Slash">
+ 		<!-- A physical AoE attack from Shnabels in the Execution Grounds. -->
+ 		<icon>icon.skill0325</icon>
+ 		<operateType>A1</operateType>
++		<reuseDelay>10000</reuseDelay>
++		<magicLevel>116</magicLevel>
++		<basicProperty>PHYSICAL</basicProperty>
++		<castRange>250</castRange>
++		<hitTime>800</hitTime>
++		<coolTime>300</coolTime>
++		<effectPoint>-100</effectPoint>
++		<magicCriticalRate>-5</magicCriticalRate>
++		<hitCancelTime>0</hitCancelTime>
++		<magicLevel>97</magicLevel>
++		<affectRange>150</affectRange>
++		<mpConsume>119</mpConsume>
++		<targetType>SELF</targetType>
++		<affectScope>POINT_BLANK</affectScope>
++		<affectObject>NOT_FRIEND</affectObject>
++		<effects>
++			<effect name="PhysicalAttack">
++				<power>30000</power>
++			</effect>
++		</effects>
+ 	</skill>
+ 	<skill id="34510" toLevel="1" name="Death Butcher's Attack">
+ 		<!-- A basic physical attack from Henkers in the Execution Grounds. -->
+ 		<icon>icon.skill0325</icon>
+ 		<operateType>A1</operateType>
++		<reuseDelay>10000</reuseDelay>
++		<magicLevel>116</magicLevel>
++		<basicProperty>PHYSICAL</basicProperty>
++		<magicCriticalRate>-5</magicCriticalRate>
++		<castRange>150</castRange>
++		<effectRange>150</effectRange>
++		<hitTime>800</hitTime>
++		<coolTime>300</coolTime>
++		<effectPoint>-111</effectPoint>
++		<attributeType>DARK</attributeType>
++		<attributeValue>500</attributeValue>
++		<effectPoint>-150</effectPoint>
++		<magicCriticalRate>45</magicCriticalRate>
++		<targetType>ENEMY</targetType>
++		<affectScope>SINGLE</affectScope>
++		<effects>
++			<effect name="PhysicalAttack">
++				<power>50000</power>
++			</effect>
++		</effects>
+ 	</skill>
+ 	<skill id="34511" toLevel="1" name="Death Butcher's Slash">
+ 		<!-- A physical AoE attack from Henkers in the Execution Grounds. -->
+ 		<icon>icon.skill0325</icon>
+ 		<operateType>A1</operateType>
++		<reuseDelay>10000</reuseDelay>
++		<magicLevel>116</magicLevel>
++		<basicProperty>PHYSICAL</basicProperty>
++		<castRange>300</castRange>
++		<hitTime>800</hitTime>
++		<coolTime>300</coolTime>
++		<effectPoint>-350</effectPoint>
++		<magicCriticalRate>-5</magicCriticalRate>
++		<hitCancelTime>0</hitCancelTime>
++		<magicLevel>97</magicLevel>
++		<affectRange>350</affectRange>
++		<mpConsume>119</mpConsume>
++		<targetType>SELF</targetType>
++		<affectScope>POINT_BLANK</affectScope>
++		<affectObject>NOT_FRIEND</affectObject>
++		<effects>
++			<effect name="PhysicalAttack">
++				<power>50000</power>
++			</effect>
++		</effects>
+ 	</skill>
+ 	<skill id="34512" toLevel="1" name="Original Spark's Rush">
+ 		<!-- Charge/ animals. -->
+diff --git a/dist/game/data/zones/AreaBossGuillotine.xml b/dist/game/data/zones/AreaBossGuillotine.xml
+new file mode 100644
+index 0000000000..6c722722c5
+--- /dev/null
++++ b/dist/game/data/zones/AreaBossGuillotine.xml
+@@ -0,0 +1,19 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<list enabled="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../xsd/zones.xsd">
++    <zone id="9900099" name="RaidBossGuillotine" type="ArenaZone" shape="NPoly" minZ="-2800" maxZ="-2500">
++        <!-- Coordenadas da arena -->
++        <node X="46037" Y="153773" />
++        <node X="44474" Y="153367" />
++        <node X="43385" Y="153524" />
++        <node X="42148" Y="153424" />
++        <node X="41594" Y="154285" />
++        <node X="41480" Y="154792" />
++        <node X="42533" Y="157152" />
++        <node X="43096" Y="157704" />
++        <node X="44264" Y="158056" />
++        <node X="45384" Y="158280" />
++        <node X="46296" Y="157832" />
++        <node X="47080" Y="157208" />
++        <node X="47988" Y="155578" />
++    </zone>
++</list>
+\ No newline at end of file

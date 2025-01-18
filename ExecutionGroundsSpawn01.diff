@@ -1,0 +1,19 @@
+ L2J_Mobius_11.3_Shinemaker/dist/game/data/zones/peace.xml | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/L2J_Mobius_11.3_Shinemaker/dist/game/data/zones/peace.xml b/L2J_Mobius_11.3_Shinemaker/dist/game/data/zones/peace.xml
+index c54aec87a8..ef79c0f7ae 100644
+--- a/L2J_Mobius_11.3_Shinemaker/dist/game/data/zones/peace.xml
++++ b/L2J_Mobius_11.3_Shinemaker/dist/game/data/zones/peace.xml
+@@ -1059,4 +1059,10 @@
+ 		<node X="-69560" Y="211768" />
+ 		<node X="-69591" Y="211993" />
+ 	</zone>
++	<zone name="Execution_Grounds_Spawn" type="PeaceZone" shape="NPoly" minZ="-2800" maxZ="-3900"> <!--Execution Grounds Spawn -->
++		<node X="48729" Y="147291" />
++		<node X="48639" Y="147696" />
++		<node X="48136" Y="147578" />
++		<node X="48212" Y="147190" />
++	</zone>
+ </list>
+\ No newline at end of file

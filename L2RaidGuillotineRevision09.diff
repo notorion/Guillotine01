@@ -1,0 +1,1561 @@
+diff --git dist/game/data/scripts/ai/areas/ExecutionGrounds/Guillotine.java dist/game/data/scripts/ai/areas/ExecutionGrounds/Guillotine.java
+deleted file mode 100644
+index f0d8f082939..00000000000
+--- dist/game/data/scripts/ai/areas/ExecutionGrounds/Guillotine.java
++++ /dev/null
+@@ -1,536 +0,0 @@
+-/*
+- * Copyright (c) 2013 L2jMobius
+- * 
+- * Permission is hereby granted, free of charge, to any person obtaining a copy
+- * of this software and associated documentation files (the "Software"), to deal
+- * in the Software without restriction, including without limitation the rights
+- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+- * copies of the Software, and to permit persons to whom the Software is
+- * furnished to do so, subject to the following conditions:
+- * 
+- * The above copyright notice and this permission notice shall be
+- * included in all copies or substantial portions of the Software.
+- * 
+- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+- * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+- * IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+- */
+-package ai.areas.ExecutionGrounds;
+-
+-import java.util.ArrayList;
+-import java.util.Calendar;
+-import java.util.List;
+-import java.util.Map;
+-import java.util.concurrent.ConcurrentHashMap;
+-
+-import org.l2jmobius.commons.threads.ThreadPool;
+-import org.l2jmobius.gameserver.data.SpawnTable;
+-import org.l2jmobius.gameserver.data.xml.NpcData;
+-import org.l2jmobius.gameserver.managers.DatabaseSpawnManager;
+-import org.l2jmobius.gameserver.managers.GlobalVariablesManager;
+-import org.l2jmobius.gameserver.managers.ZoneManager;
+-import org.l2jmobius.gameserver.model.Location;
+-import org.l2jmobius.gameserver.model.Spawn;
+-import org.l2jmobius.gameserver.model.World;
+-import org.l2jmobius.gameserver.model.actor.Npc;
+-import org.l2jmobius.gameserver.model.actor.Player;
+-import org.l2jmobius.gameserver.model.actor.templates.NpcTemplate;
+-import org.l2jmobius.gameserver.model.script.Script;
+-import org.l2jmobius.gameserver.model.skill.SkillCaster;
+-import org.l2jmobius.gameserver.model.skill.holders.SkillHolder;
+-import org.l2jmobius.gameserver.model.zone.type.ArenaZone;
+-import org.l2jmobius.gameserver.network.NpcStringId;
+-import org.l2jmobius.gameserver.network.serverpackets.ExShowScreenMessage;
+-
+-/**
+- * @author Notorion
+- */
+-public class Guillotine extends Script
+-{
+-	// NPC
+-	private static final int MAIN_BOSS_ID = 29402;
+-	private static Npc _spawnedMainBoss;
+-	private static final Location SPAWN_LOCATION = new Location(44967, 155944, -2708);
+-	private static final ArenaZone ARENA_ZONE = ZoneManager.getInstance().getZoneByName("RaidBossGuillotine", ArenaZone.class);
+-	
+-	// Barrier skill and attack control
+-	private static final SkillHolder LIMIT_BARRIER = new SkillHolder(29518, 1);
+-	private static final int HIT_COUNT = 500;
+-	private boolean _barrierActivated = false;
+-	private final Map<Npc, Integer> _guillotineHits = new ConcurrentHashMap<>();
+-	private final Map<Npc, Boolean> _clonesTemp94 = new ConcurrentHashMap<>();
+-	private final Map<Npc, Boolean> _clonesTemp75 = new ConcurrentHashMap<>();
+-	private final Map<Npc, Boolean> _clonesTemp42 = new ConcurrentHashMap<>();
+-	
+-	// NPCs of Clones and Slaves
+-	private static final int CLONE_NPC_ID = 29403;
+-	private static final int SLAVE1_NPC_ID = 29404;
+-	private static final int SLAVE2_NPC_ID = 29405;
+-	private static final int SLAVE3_NPC_ID = 29406;
+-	
+-	// ID of temporary Clones NPCs
+-	private static final int CLONESTEMP94_NPC_ID = 29403;
+-	private static final int CLONESTEMP75_NPC_ID = 29403;
+-	private static final int CLONESTEMP42_NPC_ID = 29403;
+-	
+-	// Temporary clones control variables
+-	private boolean _spawningClonesTemp94 = false;
+-	private boolean _spawningClonesTemp75 = false;
+-	private boolean _spawningClonesTemp42 = false;
+-	private boolean _spawningClones95 = false;
+-	private boolean _spawningClones75 = false;
+-	private boolean _spawningClones50 = false;
+-	private boolean _spawningSlaves93 = false;
+-	private boolean _spawningSlaves70 = false;
+-	private boolean _spawningSlaves50 = false;
+-	private boolean _spawningSlaves45 = false;
+-	private boolean _spawningSlaves40 = false;
+-	private boolean _spawningSlaves25 = false;
+-	private boolean _spawningSlaves15 = false;
+-	private boolean _spawningSlaves5 = false;
+-	private boolean _spawningSlaves1 = false;
+-	
+-	// Slaves Effects Skills
+-	private static final SkillHolder SLAVE1_DEATH_SKILL = new SkillHolder(34464, 1);
+-	private static final SkillHolder SLAVE2_DEATH_SKILL = new SkillHolder(34465, 1);
+-	private static final SkillHolder SLAVE3_DEATH_SKILL = new SkillHolder(34466, 1);
+-	private final Map<Npc, Boolean> _deathSkillUsed = new ConcurrentHashMap<>();
+-	
+-	public Guillotine()
+-	{
+-		addKillId(MAIN_BOSS_ID);
+-		addKillId(SLAVE1_NPC_ID, SLAVE2_NPC_ID, SLAVE3_NPC_ID);
+-		addAttackId(SLAVE1_NPC_ID, SLAVE2_NPC_ID, SLAVE3_NPC_ID);
+-		addAttackId(MAIN_BOSS_ID);
+-		
+-		final long currentTime = System.currentTimeMillis();
+-		final Calendar calendarGuillotineStart = Calendar.getInstance();
+-		
+-		// Spawn time to 21h00 Thursday.
+-		calendarGuillotineStart.set(Calendar.DAY_OF_WEEK, Calendar.THURSDAY);
+-		calendarGuillotineStart.set(Calendar.HOUR_OF_DAY, 21);
+-		calendarGuillotineStart.set(Calendar.MINUTE, 0);
+-		calendarGuillotineStart.set(Calendar.SECOND, 0);
+-		
+-		if ((currentTime > calendarGuillotineStart.getTimeInMillis()) && (SpawnTable.getInstance().getAnySpawn(MAIN_BOSS_ID) == null) && GlobalVariablesManager.getInstance().getBoolean("GUILLOTINE_ALIVE", true))
+-		{
+-			spawnGuillotine();
+-		}
+-		
+-		if (calendarGuillotineStart.getTimeInMillis() < currentTime)
+-		{
+-			calendarGuillotineStart.add(Calendar.WEEK_OF_YEAR, 1);
+-		}
+-		
+-		ThreadPool.scheduleAtFixedRate(this::spawnGuillotine, calendarGuillotineStart.getTimeInMillis() - currentTime, 604800000);
+-	}
+-	
+-	private void spawnGuillotine()
+-	{
+-		try
+-		{
+-			final NpcTemplate template = NpcData.getInstance().getTemplate(MAIN_BOSS_ID);
+-			final Spawn spawn = new Spawn(template);
+-			spawn.setXYZ(SPAWN_LOCATION);
+-			spawn.setHeading(0);
+-			spawn.setRespawnDelay(0);
+-			
+-			final Npc boss = DatabaseSpawnManager.getInstance().addNewSpawn(spawn, false);
+-			_spawnedMainBoss = boss;
+-			GlobalVariablesManager.getInstance().set("GUILLOTINE_ALIVE", true);
+-			
+-			// Barrier
+-			LIMIT_BARRIER.getSkill().applyEffects(_spawnedMainBoss, _spawnedMainBoss);
+-			_spawnedMainBoss.setInvul(true);
+-			_barrierActivated = true;
+-			startQuestTimer("guillotine_barrier_start", 1000, _spawnedMainBoss, null);
+-			
+-			startQuestTimer("check_arena", 10000, null, null, true); // Verification every 10 seconds.
+-		}
+-		catch (Exception e)
+-		{
+-		}
+-	}
+-	
+-	@Override
+-	public String onEvent(String event, Npc npc, Player player)
+-	{
+-		if ("check_arena".equals(event) && (_spawnedMainBoss != null))
+-		{
+-			checkBossInArena();
+-			checkBossHP();
+-		}
+-		
+-		return super.onEvent(event, npc, player);
+-	}
+-	
+-	@Override
+-	public void onAttack(Npc npc, Player attacker, int damage, boolean isSummon)
+-	{
+-		if (npc.getId() == MAIN_BOSS_ID)
+-		{
+-			if (_barrierActivated)
+-			{
+-				final int hits = _guillotineHits.getOrDefault(npc, 0) + 1;
+-				_guillotineHits.put(npc, hits);
+-				
+-				if (hits >= HIT_COUNT)
+-				{
+-					_barrierActivated = false;
+-					npc.stopSkillEffects(LIMIT_BARRIER.getSkill());
+-					npc.setInvul(false);
+-				}
+-				return;
+-			}
+-			
+-			if ((ARENA_ZONE != null) && !ARENA_ZONE.isInsideZone(attacker))
+-			{
+-				// If the player is not in the arena, teleports to Dion. Protection Boss.
+-				attacker.teleToLocation(new Location(15804, 142347, -2680), false);
+-				return;
+-			}
+-		}
+-		
+-		handleSlaveLogic(npc);
+-	}
+-	
+-	private void handleSlaveLogic(Npc npc)
+-	{
+-		if ((npc.getId() == SLAVE1_NPC_ID) || (npc.getId() == SLAVE2_NPC_ID) || (npc.getId() == SLAVE3_NPC_ID))
+-		{
+-			final double currentHp = npc.getCurrentHp();
+-			final double maxHp = npc.getMaxHp();
+-			final double hpPercentage = (currentHp / maxHp) * 100;
+-			
+-			if (currentHp <= 1)
+-			{
+-				npc.setCurrentHp(2);
+-			}
+-			
+-			if (hpPercentage <= 30)
+-			{
+-				applyDeathSkill(npc);
+-			}
+-		}
+-	}
+-	
+-	private void applyDeathSkill(Npc npc)
+-	{
+-		if (_deathSkillUsed.getOrDefault(npc, false))
+-		{
+-			return;
+-		}
+-		
+-		_deathSkillUsed.put(npc, true);
+-		SkillHolder skillToUse = null;
+-		
+-		switch (npc.getId())
+-		{
+-			case SLAVE1_NPC_ID:
+-			{
+-				skillToUse = SLAVE1_DEATH_SKILL;
+-				break;
+-			}
+-			case SLAVE2_NPC_ID:
+-			{
+-				skillToUse = SLAVE2_DEATH_SKILL;
+-				break;
+-			}
+-			case SLAVE3_NPC_ID:
+-			{
+-				skillToUse = SLAVE3_DEATH_SKILL;
+-				break;
+-			}
+-		}
+-		
+-		if ((skillToUse != null) && (skillToUse.getSkill() != null))
+-		{
+-			SkillCaster.triggerCast(npc, npc, skillToUse.getSkill());
+-			ThreadPool.schedule(npc::deleteMe, 1500);
+-		}
+-	}
+-	
+-	private void checkBossInArena()
+-	{
+-		if ((ARENA_ZONE != null) && (_spawnedMainBoss != null) && !ARENA_ZONE.isInsideZone(_spawnedMainBoss))
+-		{
+-			_spawnedMainBoss.teleToLocation(SPAWN_LOCATION, false);
+-		}
+-	}
+-	
+-	// Modification of reappearance values ​​can cause bug, test before starting.
+-	private void checkBossHP()
+-	{
+-		if (_spawnedMainBoss != null)
+-		{
+-			final double currentHP = _spawnedMainBoss.getCurrentHp();
+-			final long maxHP = _spawnedMainBoss.getMaxHp();
+-			final int currentHPPercentage = (int) ((currentHP / maxHP) * 100);
+-			
+-			if ((currentHPPercentage <= 97) && !_spawningClones95)
+-			{
+-				_spawningClones95 = true;
+-				spawnClones95();
+-			}
+-			else if ((currentHPPercentage <= 75) && !_spawningClones75)
+-			{
+-				_spawningClones75 = true;
+-				spawnClones75();
+-			}
+-			else if ((currentHPPercentage <= 50) && !_spawningClones50)
+-			{
+-				_spawningClones50 = true;
+-				spawnClones50();
+-			}
+-			
+-			if ((currentHPPercentage <= 94) && !_spawningClonesTemp94)
+-			{
+-				_spawningClonesTemp94 = true;
+-				spawnClonesTemp94();
+-			}
+-			
+-			if ((currentHPPercentage <= 78) && _spawningClonesTemp94)
+-			{
+-				final List<Npc> clonesTemp94Copy = new ArrayList<>(_clonesTemp94.keySet());
+-				for (Npc clone : clonesTemp94Copy)
+-				{
+-					if ((clone != null) && !clone.isDead())
+-					{
+-						clone.deleteMe();
+-					}
+-				}
+-				
+-				_clonesTemp94.clear();
+-			}
+-			
+-			if ((currentHPPercentage <= 75) && !_spawningClonesTemp75)
+-			{
+-				_spawningClonesTemp75 = true;
+-				spawnClonesTemp75();
+-			}
+-			else if ((currentHPPercentage <= 42) && !_spawningClonesTemp42)
+-			{
+-				_spawningClonesTemp42 = true;
+-				spawnClonesTemp42();
+-			}
+-			
+-			if ((currentHPPercentage <= 93) && !_spawningSlaves93)
+-			{
+-				_spawningSlaves93 = true;
+-				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 25, 500, 600);
+-			}
+-			else if ((currentHPPercentage <= 70) && !_spawningSlaves70)
+-			{
+-				_spawningSlaves70 = true;
+-				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 18, 500, 600);
+-				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 18, 500, 600);
+-			}
+-			else if ((currentHPPercentage <= 54) && !_spawningSlaves50)
+-			{
+-				_spawningSlaves50 = true;
+-				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 30, 500, 600);
+-				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 25, 500, 600);
+-				spawnSlavesAroundBoss(SLAVE3_NPC_ID, 25, 500, 600);
+-			}
+-			else if ((currentHPPercentage <= 47) && !_spawningSlaves45)
+-			{
+-				_spawningSlaves45 = true;
+-				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 26, 500, 600);
+-				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 26, 500, 600);
+-				spawnSlavesAroundBoss(SLAVE3_NPC_ID, 26, 500, 600);
+-			}
+-			else if ((currentHPPercentage <= 37) && !_spawningSlaves40)
+-			{
+-				_spawningSlaves40 = true;
+-				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 22, 500, 600);
+-				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 24, 500, 600);
+-				spawnSlavesAroundBoss(SLAVE3_NPC_ID, 22, 500, 600);
+-			}
+-			else if ((currentHPPercentage <= 28) && !_spawningSlaves25)
+-			{
+-				_spawningSlaves25 = true;
+-				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 24, 500, 600);
+-				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 25, 500, 600);
+-				spawnSlavesAroundBoss(SLAVE3_NPC_ID, 24, 500, 600);
+-			}
+-			else if ((currentHPPercentage <= 18) && !_spawningSlaves15)
+-			{
+-				_spawningSlaves15 = true;
+-				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 30, 500, 600);
+-				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 25, 500, 600);
+-				spawnSlavesAroundBoss(SLAVE3_NPC_ID, 25, 500, 600);
+-			}
+-			else if ((currentHPPercentage <= 10) && !_spawningSlaves5)
+-			{
+-				_spawningSlaves5 = true;
+-				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 25, 500, 600);
+-				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 25, 500, 600);
+-				spawnSlavesAroundBoss(SLAVE3_NPC_ID, 30, 500, 600);
+-			}
+-			else if ((currentHPPercentage <= 4) && !_spawningSlaves1)
+-			{
+-				_spawningSlaves1 = true;
+-				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 25, 500, 600);
+-				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 30, 500, 600);
+-				spawnSlavesAroundBoss(SLAVE3_NPC_ID, 30, 500, 600);
+-			}
+-		}
+-	}
+-	
+-	private void spawnSlavesAroundBoss(int npcId, int count, int minRadius, int maxRadius)
+-	{
+-		final Location bossLoc = _spawnedMainBoss.getLocation();
+-		for (int i = 0; i < count; i++)
+-		{
+-			final double angle = (2 * Math.PI * i) / count;
+-			final int radius = getRandom(minRadius, maxRadius);
+-			final int x = bossLoc.getX() + (int) (radius * Math.cos(angle));
+-			final int y = bossLoc.getY() + (int) (radius * Math.sin(angle));
+-			final int z = bossLoc.getZ();
+-			addSpawn(npcId, new Location(x, y, z));
+-		}
+-	}
+-	
+-	private void spawnClonesTemp94()
+-	{
+-		final Location[] cloneLocations94 =
+-		{
+-			new Location(44331, 155883, -2734),
+-			new Location(44465, 155501, -2734),
+-			new Location(44836, 155344, -2734)
+-		};
+-		
+-		_clonesTemp94.clear();
+-		
+-		for (Location loc : cloneLocations94)
+-		{
+-			final Npc clone = addSpawn(CLONESTEMP94_NPC_ID, loc);
+-			_clonesTemp94.put(clone, true);
+-		}
+-	}
+-	
+-	private void spawnClonesTemp75()
+-	{
+-		final Location[] cloneLocations75 =
+-		{
+-			new Location(45430, 156351, -2734),
+-			new Location(45600, 156007, -2734),
+-			new Location(45095, 156548, -2713)
+-		};
+-		
+-		for (Location loc : cloneLocations75)
+-		{
+-			final Npc clone = addSpawn(CLONESTEMP75_NPC_ID, loc);
+-			_clonesTemp75.put(clone, true);
+-		}
+-	}
+-	
+-	private void spawnClonesTemp42()
+-	{
+-		final Location[] cloneLocations42 =
+-		{
+-			new Location(44332, 155884, -2734),
+-			new Location(44464, 155502, -2734),
+-			new Location(44837, 155345, -2734)
+-		};
+-		
+-		for (Location loc : cloneLocations42)
+-		{
+-			final Npc clone = addSpawn(CLONESTEMP42_NPC_ID, loc);
+-			_clonesTemp42.put(clone, true);
+-		}
+-	}
+-	
+-	private void spawnClones95()
+-	{
+-		final Location[] cloneLocations95 =
+-		{
+-			new Location(45773, 156665, -2713),
+-			new Location(45196, 156999, -2713),
+-			new Location(44550, 156926, -2713)
+-		};
+-		
+-		for (Location loc : cloneLocations95)
+-		{
+-			addSpawn(CLONE_NPC_ID, loc);
+-		}
+-		
+-		_spawnedMainBoss.broadcastPacket(new ExShowScreenMessage(NpcStringId.GUILLOTINE_SUMMONS_HIS_CLONE, ExShowScreenMessage.TOP_CENTER, 10000, true));
+-	}
+-	
+-	private void spawnClones75()
+-	{
+-		final Location[] cloneLocations75 =
+-		{
+-			new Location(44731, 154876, -2713),
+-			new Location(44135, 155223, -2713),
+-			new Location(43868, 155843, -2713),
+-			new Location(44027, 156500, -2713)
+-		};
+-		
+-		for (Location loc : cloneLocations75)
+-		{
+-			addSpawn(CLONE_NPC_ID, loc);
+-		}
+-		
+-		_spawnedMainBoss.broadcastPacket(new ExShowScreenMessage(NpcStringId.GUILLOTINE_SUMMONS_HIS_CLONE, ExShowScreenMessage.TOP_CENTER, 10000, true));
+-	}
+-	
+-	private void spawnClones50()
+-	{
+-		final Location[] cloneLocations50 =
+-		{
+-			new Location(46021, 156054, -2712),
+-			new Location(45881, 155405, -2712),
+-			new Location(45396, 154969, -2712)
+-		};
+-		
+-		for (Location loc : cloneLocations50)
+-		{
+-			addSpawn(CLONE_NPC_ID, loc);
+-		}
+-		
+-		_spawnedMainBoss.broadcastPacket(new ExShowScreenMessage(NpcStringId.GUILLOTINE_SUMMONS_HIS_CLONE, ExShowScreenMessage.TOP_CENTER, 10000, true));
+-	}
+-	
+-	public boolean isGuillotineActive()
+-	{
+-		return _spawnedMainBoss != null;
+-	}
+-	
+-	@Override
+-	public void onKill(Npc npc, Player killer, boolean isSummon)
+-	{
+-		if (npc.getId() == MAIN_BOSS_ID)
+-		{
+-			cancelQuestTimers("check_arena");
+-			
+-			for (Npc spawnedNpc : World.getInstance().getVisibleObjects(npc, Npc.class))
+-			{
+-				if ((spawnedNpc != null) && ((spawnedNpc.getId() == CLONE_NPC_ID) || (spawnedNpc.getId() == SLAVE1_NPC_ID) || (spawnedNpc.getId() == SLAVE2_NPC_ID) || (spawnedNpc.getId() == SLAVE3_NPC_ID) || ((spawnedNpc.getId() == CLONESTEMP94_NPC_ID) && _clonesTemp94.containsKey(spawnedNpc)) || ((spawnedNpc.getId() == CLONESTEMP75_NPC_ID) && _clonesTemp75.containsKey(spawnedNpc)) || ((spawnedNpc.getId() == CLONESTEMP42_NPC_ID) && _clonesTemp42.containsKey(spawnedNpc))))
+-				{
+-					spawnedNpc.deleteMe();
+-				}
+-			}
+-			
+-			_spawnedMainBoss = null;
+-			GlobalVariablesManager.getInstance().set("GUILLOTINE_ALIVE", false);
+-			
+-			_spawningClones95 = false;
+-			_spawningClones75 = false;
+-			_spawningClones50 = false;
+-			
+-			_spawningClonesTemp94 = false;
+-			_spawningClonesTemp75 = false;
+-			_spawningClonesTemp42 = false;
+-		}
+-	}
+-	
+-	public static void main(String[] args)
+-	{
+-		new Guillotine();
+-	}
+-}
+diff --git dist/game/data/scripts/ai/bosses/Guillotine/Guillotine.java dist/game/data/scripts/ai/bosses/Guillotine/Guillotine.java
+new file mode 100644
+index 00000000000..504c9dbf82e
+--- /dev/null
++++ dist/game/data/scripts/ai/bosses/Guillotine/Guillotine.java
+@@ -0,0 +1,546 @@
++/*
++ * Copyright (c) 2013 L2jMobius
++ * 
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this software and associated documentation files (the "Software"), to deal
++ * in the Software without restriction, including without limitation the rights
++ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++ * copies of the Software, and to permit persons to whom the Software is
++ * furnished to do so, subject to the following conditions:
++ * 
++ * The above copyright notice and this permission notice shall be
++ * included in all copies or substantial portions of the Software.
++ * 
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
++ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
++ * IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
++ */
++package ai.bosses.Guillotine;
++
++import java.util.ArrayList;
++import java.util.Calendar;
++import java.util.List;
++import java.util.Map;
++import java.util.concurrent.ConcurrentHashMap;
++
++import org.l2jmobius.commons.threads.ThreadPool;
++import org.l2jmobius.gameserver.data.SpawnTable;
++import org.l2jmobius.gameserver.data.xml.NpcData;
++import org.l2jmobius.gameserver.managers.DatabaseSpawnManager;
++import org.l2jmobius.gameserver.managers.GlobalVariablesManager;
++import org.l2jmobius.gameserver.managers.ZoneManager;
++import org.l2jmobius.gameserver.model.Location;
++import org.l2jmobius.gameserver.model.Spawn;
++import org.l2jmobius.gameserver.model.World;
++import org.l2jmobius.gameserver.model.actor.Npc;
++import org.l2jmobius.gameserver.model.actor.Player;
++import org.l2jmobius.gameserver.model.actor.templates.NpcTemplate;
++import org.l2jmobius.gameserver.model.script.Script;
++import org.l2jmobius.gameserver.model.skill.SkillCaster;
++import org.l2jmobius.gameserver.model.skill.holders.SkillHolder;
++import org.l2jmobius.gameserver.model.zone.type.ArenaZone;
++import org.l2jmobius.gameserver.network.NpcStringId;
++import org.l2jmobius.gameserver.network.serverpackets.ExShowScreenMessage;
++
++/**
++ * Guillotine AI
++ * @author Notorion
++ */
++public class Guillotine extends Script
++{
++	// NPC
++	private static final int MAIN_BOSS_ID = 29402;
++	private static Npc _spawnedMainBoss;
++	private static final Location SPAWN_LOCATION = new Location(44967, 155944, -2708);
++	private static final ArenaZone ARENA_ZONE = ZoneManager.getInstance().getZoneByName("RaidBossGuillotine", ArenaZone.class);
++	
++	// Barrier skill and attack control
++	private static final SkillHolder LIMIT_BARRIER = new SkillHolder(29518, 1);
++	private static final int HIT_COUNT = 500;
++	private boolean _barrierActivated = false;
++	private final Map<Npc, Integer> _guillotineHits = new ConcurrentHashMap<>();
++	private final Map<Npc, Boolean> _clonesTemp94 = new ConcurrentHashMap<>();
++	private final Map<Npc, Boolean> _clonesTemp75 = new ConcurrentHashMap<>();
++	private final Map<Npc, Boolean> _clonesTemp42 = new ConcurrentHashMap<>();
++	
++	// NPCs of Clones and Slaves
++	private static final int CLONE_NPC_ID = 29403;
++	private static final int SLAVE1_NPC_ID = 29404;
++	private static final int SLAVE2_NPC_ID = 29405;
++	private static final int SLAVE3_NPC_ID = 29406;
++	
++	// ID of temporary Clones NPCs
++	private static final int CLONESTEMP94_NPC_ID = 29403;
++	private static final int CLONESTEMP75_NPC_ID = 29403;
++	private static final int CLONESTEMP42_NPC_ID = 29403;
++	
++	// Temporary clones control variables
++	private boolean _spawningClonesTemp94 = false;
++	private boolean _spawningClonesTemp75 = false;
++	private boolean _spawningClonesTemp42 = false;
++	private boolean _spawningClones95 = false;
++	private boolean _spawningClones75 = false;
++	private boolean _spawningClones50 = false;
++	private boolean _spawningSlaves93 = false;
++	private boolean _spawningSlaves70 = false;
++	private boolean _spawningSlaves50 = false;
++	private boolean _spawningSlaves45 = false;
++	private boolean _spawningSlaves40 = false;
++	private boolean _spawningSlaves25 = false;
++	private boolean _spawningSlaves15 = false;
++	private boolean _spawningSlaves5 = false;
++	private boolean _spawningSlaves1 = false;
++	
++	// Slaves Effects Skills
++	private static final SkillHolder SLAVE1_DEATH_SKILL = new SkillHolder(34464, 1);
++	private static final SkillHolder SLAVE2_DEATH_SKILL = new SkillHolder(34465, 1);
++	private static final SkillHolder SLAVE3_DEATH_SKILL = new SkillHolder(34466, 1);
++	private final Map<Npc, Boolean> _deathSkillUsed = new ConcurrentHashMap<>();
++	
++	public Guillotine()
++	{
++		addKillId(MAIN_BOSS_ID);
++		addKillId(SLAVE1_NPC_ID, SLAVE2_NPC_ID, SLAVE3_NPC_ID);
++		addAttackId(SLAVE1_NPC_ID, SLAVE2_NPC_ID, SLAVE3_NPC_ID);
++		addAttackId(MAIN_BOSS_ID);
++		
++		final long currentTime = System.currentTimeMillis();
++		final Calendar calendarGuillotineStart = Calendar.getInstance();
++		
++		// Spawn time to 21h00 Thursday.
++		calendarGuillotineStart.set(Calendar.DAY_OF_WEEK, Calendar.THURSDAY);
++		calendarGuillotineStart.set(Calendar.HOUR_OF_DAY, 21);
++		calendarGuillotineStart.set(Calendar.MINUTE, 0);
++		calendarGuillotineStart.set(Calendar.SECOND, 0);
++		
++		if (GlobalVariablesManager.getInstance().getBoolean("GUILLOTINE_ALIVE", true))
++		{
++			spawnGuillotine();
++		}
++		
++		if (calendarGuillotineStart.getTimeInMillis() < currentTime)
++		{
++			calendarGuillotineStart.add(Calendar.WEEK_OF_YEAR, 1);
++		}
++		
++		ThreadPool.scheduleAtFixedRate(this::spawnGuillotine, calendarGuillotineStart.getTimeInMillis() - currentTime, 604800000);
++	}
++	
++	private void spawnGuillotine()
++	{
++		Spawn oldSpawn = SpawnTable.getInstance().getAnySpawn(MAIN_BOSS_ID);
++		if (oldSpawn != null)
++		{
++			if (oldSpawn.getLastSpawn() != null)
++			{
++				oldSpawn.getLastSpawn().deleteMe();
++			}
++			SpawnTable.getInstance().removeSpawn(oldSpawn);
++		}
++		try
++		{
++			final NpcTemplate template = NpcData.getInstance().getTemplate(MAIN_BOSS_ID);
++			final Spawn spawn = new Spawn(template);
++			spawn.setXYZ(SPAWN_LOCATION);
++			spawn.setHeading(0);
++			spawn.setRespawnDelay(0);
++			final Npc boss = DatabaseSpawnManager.getInstance().addNewSpawn(spawn, false);
++			_spawnedMainBoss = boss;
++			GlobalVariablesManager.getInstance().set("GUILLOTINE_ALIVE", true);
++			System.out.println("Guillotine Manager: Guillotine (29402) spawned successfully.");
++			
++			// Barrier
++			LIMIT_BARRIER.getSkill().applyEffects(_spawnedMainBoss, _spawnedMainBoss);
++			_spawnedMainBoss.setInvul(true);
++			_barrierActivated = true;
++			startQuestTimer("guillotine_barrier_start", 1000, _spawnedMainBoss, null);
++			
++			startQuestTimer("check_arena", 10000, null, null, true);
++		}
++		catch (Exception e)
++		{
++			e.printStackTrace();
++		}
++	}
++	
++	@Override
++	public String onEvent(String event, Npc npc, Player player)
++	{
++		if ("check_arena".equals(event) && (_spawnedMainBoss != null))
++		{
++			checkBossInArena();
++			checkBossHP();
++		}
++		
++		return super.onEvent(event, npc, player);
++	}
++	
++	@Override
++	public void onAttack(Npc npc, Player attacker, int damage, boolean isSummon)
++	{
++		if (npc.getId() == MAIN_BOSS_ID)
++		{
++			if (_barrierActivated)
++			{
++				final int hits = _guillotineHits.getOrDefault(npc, 0) + 1;
++				_guillotineHits.put(npc, hits);
++				
++				if (hits >= HIT_COUNT)
++				{
++					_barrierActivated = false;
++					npc.stopSkillEffects(LIMIT_BARRIER.getSkill());
++					npc.setInvul(false);
++				}
++				return;
++			}
++			
++			if ((ARENA_ZONE != null) && !ARENA_ZONE.isInsideZone(attacker))
++			{
++				// If the player is not in the arena, teleports to Dion. Protection Boss.
++				attacker.teleToLocation(new Location(15804, 142347, -2680), false);
++				return;
++			}
++		}
++		
++		handleSlaveLogic(npc);
++	}
++	
++	private void handleSlaveLogic(Npc npc)
++	{
++		if ((npc.getId() == SLAVE1_NPC_ID) || (npc.getId() == SLAVE2_NPC_ID) || (npc.getId() == SLAVE3_NPC_ID))
++		{
++			final double currentHp = npc.getCurrentHp();
++			final double maxHp = npc.getMaxHp();
++			final double hpPercentage = (currentHp / maxHp) * 100;
++			
++			if (currentHp <= 1)
++			{
++				npc.setCurrentHp(2);
++			}
++			
++			if (hpPercentage <= 30)
++			{
++				applyDeathSkill(npc);
++			}
++		}
++	}
++	
++	private void applyDeathSkill(Npc npc)
++	{
++		if (_deathSkillUsed.getOrDefault(npc, false))
++		{
++			return;
++		}
++		
++		_deathSkillUsed.put(npc, true);
++		SkillHolder skillToUse = null;
++		
++		switch (npc.getId())
++		{
++			case SLAVE1_NPC_ID:
++			{
++				skillToUse = SLAVE1_DEATH_SKILL;
++				break;
++			}
++			case SLAVE2_NPC_ID:
++			{
++				skillToUse = SLAVE2_DEATH_SKILL;
++				break;
++			}
++			case SLAVE3_NPC_ID:
++			{
++				skillToUse = SLAVE3_DEATH_SKILL;
++				break;
++			}
++		}
++		
++		if ((skillToUse != null) && (skillToUse.getSkill() != null))
++		{
++			SkillCaster.triggerCast(npc, npc, skillToUse.getSkill());
++			ThreadPool.schedule(npc::deleteMe, 1500);
++		}
++	}
++	
++	private void checkBossInArena()
++	{
++		if ((ARENA_ZONE != null) && (_spawnedMainBoss != null) && !ARENA_ZONE.isInsideZone(_spawnedMainBoss))
++		{
++			_spawnedMainBoss.teleToLocation(SPAWN_LOCATION, false);
++		}
++	}
++	
++	private void checkBossHP()
++	{
++		if (_spawnedMainBoss != null)
++		{
++			final double currentHP = _spawnedMainBoss.getCurrentHp();
++			final long maxHP = _spawnedMainBoss.getMaxHp();
++			final int currentHPPercentage = (int) ((currentHP / maxHP) * 100);
++			
++			if ((currentHPPercentage <= 97) && !_spawningClones95)
++			{
++				_spawningClones95 = true;
++				spawnClones95();
++			}
++			else if ((currentHPPercentage <= 75) && !_spawningClones75)
++			{
++				_spawningClones75 = true;
++				spawnClones75();
++			}
++			else if ((currentHPPercentage <= 50) && !_spawningClones50)
++			{
++				_spawningClones50 = true;
++				spawnClones50();
++			}
++			
++			if ((currentHPPercentage <= 94) && !_spawningClonesTemp94)
++			{
++				_spawningClonesTemp94 = true;
++				spawnClonesTemp94();
++			}
++			
++			if ((currentHPPercentage <= 78) && _spawningClonesTemp94)
++			{
++				final List<Npc> clonesTemp94Copy = new ArrayList<>(_clonesTemp94.keySet());
++				for (Npc clone : clonesTemp94Copy)
++				{
++					if ((clone != null) && !clone.isDead())
++					{
++						clone.deleteMe();
++					}
++				}
++				
++				_clonesTemp94.clear();
++			}
++			
++			if ((currentHPPercentage <= 75) && !_spawningClonesTemp75)
++			{
++				_spawningClonesTemp75 = true;
++				spawnClonesTemp75();
++			}
++			else if ((currentHPPercentage <= 42) && !_spawningClonesTemp42)
++			{
++				_spawningClonesTemp42 = true;
++				spawnClonesTemp42();
++			}
++			
++			if ((currentHPPercentage <= 93) && !_spawningSlaves93)
++			{
++				_spawningSlaves93 = true;
++				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 25, 500, 600);
++			}
++			else if ((currentHPPercentage <= 70) && !_spawningSlaves70)
++			{
++				_spawningSlaves70 = true;
++				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 18, 500, 600);
++				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 18, 500, 600);
++			}
++			else if ((currentHPPercentage <= 54) && !_spawningSlaves50)
++			{
++				_spawningSlaves50 = true;
++				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 30, 500, 600);
++				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 25, 500, 600);
++				spawnSlavesAroundBoss(SLAVE3_NPC_ID, 25, 500, 600);
++			}
++			else if ((currentHPPercentage <= 47) && !_spawningSlaves45)
++			{
++				_spawningSlaves45 = true;
++				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 26, 500, 600);
++				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 26, 500, 600);
++				spawnSlavesAroundBoss(SLAVE3_NPC_ID, 26, 500, 600);
++			}
++			else if ((currentHPPercentage <= 37) && !_spawningSlaves40)
++			{
++				_spawningSlaves40 = true;
++				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 22, 500, 600);
++				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 24, 500, 600);
++				spawnSlavesAroundBoss(SLAVE3_NPC_ID, 22, 500, 600);
++			}
++			else if ((currentHPPercentage <= 28) && !_spawningSlaves25)
++			{
++				_spawningSlaves25 = true;
++				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 24, 500, 600);
++				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 25, 500, 600);
++				spawnSlavesAroundBoss(SLAVE3_NPC_ID, 24, 500, 600);
++			}
++			else if ((currentHPPercentage <= 18) && !_spawningSlaves15)
++			{
++				_spawningSlaves15 = true;
++				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 30, 500, 600);
++				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 25, 500, 600);
++				spawnSlavesAroundBoss(SLAVE3_NPC_ID, 25, 500, 600);
++			}
++			else if ((currentHPPercentage <= 10) && !_spawningSlaves5)
++			{
++				_spawningSlaves5 = true;
++				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 25, 500, 600);
++				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 25, 500, 600);
++				spawnSlavesAroundBoss(SLAVE3_NPC_ID, 30, 500, 600);
++			}
++			else if ((currentHPPercentage <= 4) && !_spawningSlaves1)
++			{
++				_spawningSlaves1 = true;
++				spawnSlavesAroundBoss(SLAVE1_NPC_ID, 25, 500, 600);
++				spawnSlavesAroundBoss(SLAVE2_NPC_ID, 30, 500, 600);
++				spawnSlavesAroundBoss(SLAVE3_NPC_ID, 30, 500, 600);
++			}
++		}
++	}
++	
++	private void spawnSlavesAroundBoss(int npcId, int count, int minRadius, int maxRadius)
++	{
++		final Location bossLoc = _spawnedMainBoss.getLocation();
++		for (int i = 0; i < count; i++)
++		{
++			final double angle = (2 * Math.PI * i) / count;
++			final int radius = getRandom(minRadius, maxRadius);
++			final int x = bossLoc.getX() + (int) (radius * Math.cos(angle));
++			final int y = bossLoc.getY() + (int) (radius * Math.sin(angle));
++			final int z = bossLoc.getZ();
++			addSpawn(npcId, new Location(x, y, z));
++		}
++	}
++	
++	private void spawnClonesTemp94()
++	{
++		final Location[] cloneLocations94 =
++		{
++			new Location(44331, 155883, -2734),
++			new Location(44465, 155501, -2734),
++			new Location(44836, 155344, -2734)
++		};
++		
++		_clonesTemp94.clear();
++		
++		for (Location loc : cloneLocations94)
++		{
++			final Npc clone = addSpawn(CLONESTEMP94_NPC_ID, loc);
++			_clonesTemp94.put(clone, true);
++		}
++	}
++	
++	private void spawnClonesTemp75()
++	{
++		final Location[] cloneLocations75 =
++		{
++			new Location(45430, 156351, -2734),
++			new Location(45600, 156007, -2734),
++			new Location(45095, 156548, -2713)
++		};
++		
++		for (Location loc : cloneLocations75)
++		{
++			final Npc clone = addSpawn(CLONESTEMP75_NPC_ID, loc);
++			_clonesTemp75.put(clone, true);
++		}
++	}
++	
++	private void spawnClonesTemp42()
++	{
++		final Location[] cloneLocations42 =
++		{
++			new Location(44332, 155884, -2734),
++			new Location(44464, 155502, -2734),
++			new Location(44837, 155345, -2734)
++		};
++		
++		for (Location loc : cloneLocations42)
++		{
++			final Npc clone = addSpawn(CLONESTEMP42_NPC_ID, loc);
++			_clonesTemp42.put(clone, true);
++		}
++	}
++	
++	private void spawnClones95()
++	{
++		final Location[] cloneLocations95 =
++		{
++			new Location(45773, 156665, -2713),
++			new Location(45196, 156999, -2713),
++			new Location(44550, 156926, -2713)
++		};
++		
++		for (Location loc : cloneLocations95)
++		{
++			addSpawn(CLONE_NPC_ID, loc);
++		}
++		
++		_spawnedMainBoss.broadcastPacket(new ExShowScreenMessage(NpcStringId.GUILLOTINE_SUMMONS_HIS_CLONE, ExShowScreenMessage.TOP_CENTER, 10000, true));
++	}
++	
++	private void spawnClones75()
++	{
++		final Location[] cloneLocations75 =
++		{
++			new Location(44731, 154876, -2713),
++			new Location(44135, 155223, -2713),
++			new Location(43868, 155843, -2713),
++			new Location(44027, 156500, -2713)
++		};
++		
++		for (Location loc : cloneLocations75)
++		{
++			addSpawn(CLONE_NPC_ID, loc);
++		}
++		
++		_spawnedMainBoss.broadcastPacket(new ExShowScreenMessage(NpcStringId.GUILLOTINE_SUMMONS_HIS_CLONE, ExShowScreenMessage.TOP_CENTER, 10000, true));
++	}
++	
++	private void spawnClones50()
++	{
++		final Location[] cloneLocations50 =
++		{
++			new Location(46021, 156054, -2712),
++			new Location(45881, 155405, -2712),
++			new Location(45396, 154969, -2712)
++		};
++		
++		for (Location loc : cloneLocations50)
++		{
++			addSpawn(CLONE_NPC_ID, loc);
++		}
++		
++		_spawnedMainBoss.broadcastPacket(new ExShowScreenMessage(NpcStringId.GUILLOTINE_SUMMONS_HIS_CLONE, ExShowScreenMessage.TOP_CENTER, 10000, true));
++	}
++	
++	public boolean isGuillotineActive()
++	{
++		return _spawnedMainBoss != null;
++	}
++	
++	@Override
++	public void onKill(Npc npc, Player killer, boolean isSummon)
++	{
++		if (npc.getId() == MAIN_BOSS_ID)
++		{
++			cancelQuestTimers("check_arena");
++			
++			for (Npc spawnedNpc : World.getInstance().getVisibleObjects(npc, Npc.class))
++			{
++				if ((spawnedNpc != null) && ((spawnedNpc.getId() == CLONE_NPC_ID) || (spawnedNpc.getId() == SLAVE1_NPC_ID) || (spawnedNpc.getId() == SLAVE2_NPC_ID) || (spawnedNpc.getId() == SLAVE3_NPC_ID) || ((spawnedNpc.getId() == CLONESTEMP94_NPC_ID) && _clonesTemp94.containsKey(spawnedNpc)) || ((spawnedNpc.getId() == CLONESTEMP75_NPC_ID) && _clonesTemp75.containsKey(spawnedNpc)) || ((spawnedNpc.getId() == CLONESTEMP42_NPC_ID) && _clonesTemp42.containsKey(spawnedNpc))))
++				{
++					spawnedNpc.deleteMe();
++				}
++			}
++			
++			_spawnedMainBoss = null;
++			GlobalVariablesManager.getInstance().set("GUILLOTINE_ALIVE", false);
++			System.out.println("RaidBoss: Guillotine(29402) status is 2 (Dead)");
++			_spawningClones95 = false;
++			_spawningClones75 = false;
++			_spawningClones50 = false;
++			
++			_spawningClonesTemp94 = false;
++			_spawningClonesTemp75 = false;
++			_spawningClonesTemp42 = false;
++		}
++	}
++	
++	public static void main(String[] args)
++	{
++		new Guillotine();
++	}
++}
+diff --git dist/game/data/spawns/RaidbossSpawns.xml dist/game/data/spawns/RaidbossSpawns.xml
+index 96641bf5404..c5e855288a0 100644
+--- dist/game/data/spawns/RaidbossSpawns.xml
++++ dist/game/data/spawns/RaidbossSpawns.xml
+@@ -12,9 +12,9 @@
+ 	<spawn>
+ 		<npc id="29379" x="127926" y="114721" z="-3608" heading="31812" dbSave="true" dbName="Lord Ishka" respawnTime="24hour" respawnRandom="12hour" chaseRange="4000" /> <!-- Lord Ishka - Blade of Revenge -->
+ 	</spawn>
+-	<spawn>
+-		<npc id="25888" x="44960" y="155948" z="-2704" heading="0" dbSave="true" dbName="Execution Grounds Watchman Guillotine" respawnTime="24hour" respawnRandom="12hour" /> <!-- Execution Grounds Watchman Guillotine - Raid Boss -->
+-	</spawn>
++	<!-- <spawn>
++		<npc id="25888" x="44960" y="155948" z="-2704" heading="0" dbSave="true" dbName="Execution Grounds Watchman Guillotine" respawnTime="24hour" respawnRandom="12hour" /> --> <!-- Execution Grounds Watchman Guillotine - Raid Boss - Very Old no have texture -->
++	<!-- </spawn> -->
+ 	<spawn>
+ 		<npc id="29430" x="173696" y="-46960" z="-3369" heading="41413" dbSave="true" dbName="Arrogant Lebruum" respawnTime="5hour" chaseRange="2500" /> <!-- Arrogant Lebruum - Raid Boss -->
+ 	</spawn>
+diff --git dist/game/data/stats/npcs/29400-29499.xml dist/game/data/stats/npcs/29400-29499.xml
+index b98a221af4b..90be0cf9def 100644
+--- dist/game/data/stats/npcs/29400-29499.xml
++++ dist/game/data/stats/npcs/29400-29499.xml
+@@ -65,7 +65,7 @@
+ 		<acquire exp="5337882368" sp="4804094" />
+ 		<stats str="164" int="188" dex="55" wit="78" con="111" men="149">
+ 			<vitals hp="800175000" hpRegen="13.4" mp="68076" mpRegen="30" />
+-			<attack physical="639686" magical="583012" random="10" critical="4" accuracy="5" attackSpeed="253" type="SWORD" range="100" distance="80" width="120" />
++			<attack physical="639686" magical="583012" random="10" critical="4" accuracy="5" attackSpeed="253" type="SWORD" range="100" distance="2000" width="120" />
+ 			<defence physical="301296" magical="1458092" />
+ 			<speed>
+ 				<walk ground="90" />
+@@ -77,7 +77,12 @@
+ 				<defence fire="2650" water="2650" wind="2650" earth="2650" holy="2600" dark="2650" />
+ 			</attribute>
+ 		</stats>
+-		<status attackable="true" canMove="false" />
++		<status attackable="true" canMove="false" />		
++		<ai type="MAGE" aggroRange="1500" isAggressive="false" clanHelpRange="1000">
++			<clanList>
++				<clan>GUILLOTINE</clan>
++			</clanList>
++		</ai>
+ 		<collision>
+ 			<radius normal="60" />
+ 			<height normal="124.5" />
+@@ -93,11 +98,6 @@
+ 			<skill id="34460" level="1" /> <!-- Fatal Slash -->
+ 			<skill id="34461" level="1" /> <!-- Soul Decay -->
+ 		</skillList>
+-		<ai type="MAGE" aggroRange="1500" isAggressive="false" clanHelpRange="1000">
+-			<clanList>
+-				<clan>GUILLOTINE</clan>
+-			</clanList>
+-		</ai>
+ 		<dropLists>
+ 			<drop>
+ 				<group chance="100">
+@@ -187,7 +187,7 @@
+ 		<sex>MALE</sex>
+ 		<stats str="88" int="79" dex="55" wit="78" con="82" men="78">
+ 			<vitals hp="30904734" hpRegen="13.4" mp="68076" mpRegen="30" />
+-			<attack physical="319843" magical="291506" random="10" critical="4" accuracy="5" attackSpeed="253" type="SWORD" range="40" distance="80" width="120" />
++			<attack physical="319843" magical="291506" random="10" critical="4" accuracy="5" attackSpeed="253" type="SWORD" range="40" distance="1500" width="120" />
+ 			<defence physical="150648" magical="729046" />
+ 			<speed>
+ 				<walk ground="80" />
+@@ -199,7 +199,12 @@
+ 				<defence fire="2500" water="2500" wind="2500" earth="2500" holy="2450" dark="2500" />
+ 			</attribute>
+ 		</stats>
+-		<status attackable="true" undying="true" canMove="false" targetable="false" />
++		<status attackable="true" canMove="false" />	
++		<ai type="MAGE" aggroRange="1500" isAggressive="false" clanHelpRange="1000">
++			<clanList>
++				<clan>GUILLOTINE</clan>
++			</clanList>
++		</ai>
+ 		<collision>
+ 			<radius normal="23" />
+ 			<height normal="64" />
+@@ -213,11 +218,6 @@
+ 			<skill id="34462" level="1" /> <!-- Fatal Slash -->
+ 			<skill id="34463" level="1" /> <!-- Soul Decay -->
+ 		</skillList>
+-		<ai type="MAGE" aggroRange="1500" isAggressive="true" clanHelpRange="1500">
+-			<clanList>
+-				<clan>GUILLOTINE</clan>
+-			</clanList>
+-		</ai>
+ 	</npc>
+ 	<npc id="29404" level="127" type="Monster" name="Guillotine's Slave">
+ 		<race>ETC</race>
+diff --git dist/game/data/stats/skills/34400-34499.xml dist/game/data/stats/skills/34400-34499.xml
+index 5247010bff5..69f97380ea3 100644
+--- dist/game/data/stats/skills/34400-34499.xml
++++ dist/game/data/stats/skills/34400-34499.xml
+@@ -809,8 +809,27 @@
+ 	<skill id="34458" toLevel="1" name="Vicious Killing Strike">
+ 		<!-- Guillotine's Attack -->
+ 		<icon>icon.skill33915</icon>
++		<basicProperty>PHYSICAL</basicProperty>
++		<affectRange>1000</affectRange>
+ 		<operateType>A1</operateType>
+-		<effectPoint>-100</effectPoint>
++		<castRange>1300</castRange>
++		<hitTime>1500</hitTime>
++		<coolTime>500</coolTime>
++		<reuseDelay>1000</reuseDelay>
++		<effectPoint>-716</effectPoint>
++		<effectRange>2500</effectRange>
++		<targetType>ENEMY</targetType>
++		<affectScope>SQUARE</affectScope>
++		<affectObject>NOT_FRIEND</affectObject>
++		<fanRange>0;0;1300;500</fanRange>
++		<effects>
++			<effect name="PhysicalDamage">
++				<power>100</power>
++				<pAtkMod>0.085</pAtkMod>
++				<pDefMod>0.01</pDefMod>
++				<overHit>true</overHit>
++			</effect>
++		</effects>
+ 	</skill>
+ 	<skill id="34459" toLevel="1" name="Death Charge">
+ 		<!-- Demoralizes the enemy. Inflicted status: Confusion (Fear, Aerial Yoke, Faint, Charm, Stun, Paralysis, Knockback, Knockdown). -->
+@@ -822,43 +841,333 @@
+ 		<!-- A frontal conelike attack. -->
+ 		<icon>icon.skill0003</icon>
+ 		<operateType>A1</operateType>
+-		<effectPoint>-1</effectPoint>
++		<reuseDelay>5000</reuseDelay>
++		<castRange>900</castRange>
++		<hitTime>1500</hitTime>
++		<coolTime>500</coolTime>
++		<isMagic>1</isMagic> 
++		<effectPoint>-352</effectPoint>
++		<targetType>ENEMY</targetType>
++		<affectScope>FAN</affectScope>
++		<affectObject>NOT_FRIEND</affectObject>
++		<fanRange>0;0;900;120</fanRange>
++		<effects>
++			<effect name="PhysicalDamage">
++				<power>100</power>
++				<pAtkMod>0.24</pAtkMod>
++				<pDefMod>0.008</pDefMod>
++				<overHit>true</overHit>
++			</effect>
++		</effects>
+ 	</skill>
+ 	<skill id="34461" toLevel="1" name="Soul Decay">
+ 		<!-- A magic attack on the target and nearby enemies. -->
+ 		<icon>icon.skill0000</icon>
++		<affectRange>200</affectRange>
++		<basicProperty>MAGIC</basicProperty> 
++		<attributeType>DARK</attributeType>
++		<attributeValue>580</attributeValue>
++		<lvlBonusRate>1</lvlBonusRate>
++		<magicLevel>127</magicLevel>
+ 		<operateType>A1</operateType>
+-		<effectPoint>-1</effectPoint>
++		<targetType>ENEMY</targetType>
++		<affectScope>RANGE</affectScope>
++		<affectObject>NOT_FRIEND</affectObject>
++		<castRange>1500</castRange>
++		<hitTime>1500</hitTime>
++		<effectPoint>-307</effectPoint>
++		<effects>
++			<effect name="MagicalDamage">
++				<power>155360</power>
++				<ignoreShieldDefence>true</ignoreShieldDefence>
++				<overHit>true</overHit>
++			</effect>
++		</effects>
+ 	</skill>
+ 	<skill id="34462" toLevel="1" name="Fatal Slash">
+ 		<!-- A frontal conelike attack. -->
+ 		<icon>icon.skill0003</icon>
+ 		<operateType>A1</operateType>
+-		<effectPoint>-1</effectPoint>
++		<reuseDelay>5000</reuseDelay>
++		<castRange>500</castRange>
++		<hitTime>1500</hitTime>
++		<effectPoint>-352</effectPoint>
++		<targetType>ENEMY</targetType>
++		<affectScope>FAN</affectScope>
++		<affectObject>NOT_FRIEND</affectObject>
++		<fanRange>0;0;500;120</fanRange>
++		<effects>
++			<effect name="PhysicalDamage">
++				<power>100</power>
++				<pAtkMod>0.06</pAtkMod>
++				<pDefMod>0.01</pDefMod>
++				<overHit>true</overHit>
++			</effect>
++		</effects>
+ 	</skill>
+ 	<skill id="34463" toLevel="1" name="Soul Decay">
+ 		<!-- A magic attack on the target and nearby enemies. -->
+ 		<icon>icon.skill0000</icon>
++		<affectRange>200</affectRange>
++		<basicProperty>MAGIC</basicProperty> 
++		<attributeType>DARK</attributeType>
++		<attributeValue>580</attributeValue>
++		<lvlBonusRate>1</lvlBonusRate>
++		<magicLevel>126</magicLevel>
+ 		<operateType>A1</operateType>
+-		<effectPoint>-1</effectPoint>
++		<targetType>ENEMY</targetType>
++		<affectScope>RANGE</affectScope>
++		<affectObject>NOT_FRIEND</affectObject>
++		<castRange>1500</castRange>
++		<hitTime>1500</hitTime>
++		<effectPoint>-307</effectPoint>
++		<effects>
++			<effect name="MagicalDamage">
++				<power>35360</power>
++				<ignoreShieldDefence>true</ignoreShieldDefence>
++				<overHit>true</overHit>
++			</effect>
++		</effects>
+ 	</skill>
+ 	<skill id="34464" toLevel="1" name="Scream of Pain">
+ 		<!-- A zombie sacrifices itself on the order from Guillotine, inflicting Shock on you. The effect cannot be removed or resisted. -->
+ 		<icon>icon.skill16204</icon>
+-		<operateType>A1</operateType>
++		<operateType>A2</operateType>
++		<hitTime>500</hitTime>
++		<reuseDelay>3000</reuseDelay>
++		<isDebuff>true</isDebuff>
+ 		<effectPoint>-100</effectPoint>
++		<abnormalLevel>1</abnormalLevel>
++		<abnormalTime>4</abnormalTime>
++		<abnormalType>STUN</abnormalType>
++		<abnormalVisualEffect>STUN</abnormalVisualEffect>
++		<affectRange>300</affectRange>
++		<attributeType>DARK</attributeType>
++		<attributeValue>180</attributeValue>
++		<magicLevel>126</magicLevel>
++		<basicProperty>NONE</basicProperty>
++		<magicCriticalRate>-5</magicCriticalRate>
++		<trait>SHOCK</trait>
++		<targetType>SELF</targetType>
++		<affectScope>POINT_BLANK</affectScope>
++		<affectObject>NOT_FRIEND</affectObject>
++		<effects>
++			<effect name="PhysicalDamage">
++				<power>100</power>
++				<pAtkMod>0.12</pAtkMod>
++				<pDefMod>0.01</pDefMod>
++				<overHit>true</overHit>
++			</effect>
++			<effect name="BlockActions">
++				<allowedSkills>10279;10517;10025;10776;11770;1904;11264;11093;13314;1912;7002;18721;18722;28203;30516;35190</allowedSkills>
++			</effect>
++			<effect name="DefenceTrait">
++				<HOLD>100</HOLD>
++				<KNOCKDOWN>100</KNOCKDOWN>
++				<AIRBIND>100</AIRBIND>
++				<SLEEP>100</SLEEP>
++				<KNOCKBACK>100</KNOCKBACK>
++				<SHOCK>100</SHOCK>
++				<CHANGEBODY>100</CHANGEBODY>
++				<DERANGEMENT>100</DERANGEMENT>
++			</effect>
++		</effects>
+ 	</skill>
+ 	<skill id="34465" toLevel="1" name="Scream of Pain">
+ 		<!-- A zombie sacrifices itself on the order from Guillotine, inflicting Fear on you. The effect cannot be removed or resisted. -->
+ 		<icon>icon.skill0092</icon>
+-		<operateType>A1</operateType>
+-		<effectPoint>-100</effectPoint>
++		<operateType>A2</operateType>
++		<abnormalLevel>5</abnormalLevel>
++		<abnormalTime>8</abnormalTime>
++		<abnormalType>TURN_FLEE</abnormalType>
++		<abnormalVisualEffect>TURN_FLEE</abnormalVisualEffect>
++		<affectRange>150</affectRange>
++		<activateRate>90</activateRate>
++		<basicProperty>NONE</basicProperty>
++		<trait>DERANGEMENT</trait>
++		<attributeType>DARK</attributeType>
++		<attributeValue>580</attributeValue>
++		<operateType>A2</operateType>
++		<isDebuff>true</isDebuff>
++		<hitTime>500</hitTime>
++		<effectPoint>-150</effectPoint>
++		<targetType>SELF</targetType>
++		<affectScope>POINT_BLANK</affectScope>
++		<affectObject>NOT_FRIEND</affectObject>
++		<effects>
++		<effect name="PhysicalDamage">
++				<power>100</power>
++				<pAtkMod>0.12</pAtkMod>
++				<pDefMod>0.01</pDefMod>
++				<overHit>true</overHit>
++			</effect>
++			<effect name="BlockControl" />
++			<effect name="Fear" />
++			<effect name="DefenceTrait">
++				<HOLD>100</HOLD>
++				<KNOCKDOWN>100</KNOCKDOWN>
++				<SHOCK>100</SHOCK>
++				<AIRBIND>100</AIRBIND>
++				<SLEEP>100</SLEEP>
++				<KNOCKBACK>100</KNOCKBACK>
++				<CHANGEBODY>100</CHANGEBODY>
++			</effect>
++		</effects>
+ 	</skill>
+ 	<skill id="34466" toLevel="1" name="Scream of Pain">
+ 		<!-- A zombie sacrifices itself on the order from Guillotine, knocking you down. The effect cannot be removed or resisted. -->
+ 		<icon>icon.skill0092</icon>
+-		<operateType>A1</operateType>
+-		<effectPoint>-100</effectPoint>
++		<abnormalLevel>1</abnormalLevel>
++		<abnormalTime>5</abnormalTime>
++		<abnormalType>KNOCKDOWN</abnormalType>
++		<abnormalVisualEffect>KNOCKDOWN</abnormalVisualEffect>
++		<affectLimit>5-12</affectLimit>
++		<affectRange>200</affectRange>
++		<activateRate>50</activateRate>
++		<basicProperty>PHYSICAL</basicProperty>
++		<attributeType>DARK</attributeType>
++		<attributeValue>580</attributeValue>
++		<lvlBonusRate>30</lvlBonusRate>
++		<operateType>A2</operateType>
++		<mpConsume>1</mpConsume>
++		<magicCriticalRate>45</magicCriticalRate>
++		<magicLevel>126</magicLevel>
++		<hitTime>500</hitTime>
++		<coolTime>500</coolTime>
++		<reuseDelay>5000</reuseDelay>
++		<isDebuff>true</isDebuff>
++		<trait>KNOCKDOWN</trait>
++		<effectPoint>-130</effectPoint>
++		<targetType>SELF</targetType>
++		<affectScope>POINT_BLANK</affectScope>
++		<affectObject>NOT_FRIEND</affectObject>
++		<effects>
++			<effect name="PhysicalDamage">
++				<power>100</power>
++				<pAtkMod>0.12</pAtkMod>
++				<pDefMod>0.01</pDefMod>
++				<overHit>true</overHit>
++			</effect>
++			<effect name="KnockBack">
++				<speed>400</speed>
++				<distance>25</distance>
++				<knockDown>true</knockDown>
++			</effect>
++			<effect name="DefenceTrait">
++				<HOLD>100</HOLD>
++				<KNOCKDOWN>100</KNOCKDOWN>
++				<SHOCK>100</SHOCK>
++				<AIRBIND>100</AIRBIND>
++				<SLEEP>100</SLEEP>
++				<KNOCKBACK>100</KNOCKBACK>
++				<CHANGEBODY>100</CHANGEBODY>
++				<DERANGEMENT>100</DERANGEMENT>
++			</effect>
++			<effect name="BlockActions">
++				<allowedSkills>10279;10517;10025;10776;11770;1904;11264;11093;13314;1912;7002;18721;18722;28203;30516;35190</allowedSkills>
++			</effect>
++		</effects>
++	</skill>
++	<skill id="34465" toLevel="1" name="Scream of Pain">
++		<!-- A zombie sacrifices itself on the order from Guillotine, inflicting Fear on you. The effect cannot be removed or resisted. -->
++		<icon>icon.skill0092</icon>
++		<operateType>A2</operateType>
++		<abnormalLevel>5</abnormalLevel>
++		<abnormalTime>8</abnormalTime>
++		<abnormalType>TURN_FLEE</abnormalType>
++		<abnormalVisualEffect>TURN_FLEE</abnormalVisualEffect>
++		<affectRange>150</affectRange>
++		<activateRate>90</activateRate>
++		<basicProperty>NONE</basicProperty>
++		<magicLevel>-1</magicLevel>
++		<isMagic>2</isMagic>
++		<trait>DERANGEMENT</trait>
++		<attributeType>DARK</attributeType>
++		<attributeValue>580</attributeValue>
++		<operateType>A2</operateType>
++		<isDebuff>true</isDebuff>
++		<hitTime>500</hitTime>
++		<effectPoint>-150</effectPoint>
++		<targetType>SELF</targetType>
++		<affectScope>POINT_BLANK</affectScope>
++		<affectObject>NOT_FRIEND</affectObject>
++		<effects>
++		<effect name="PhysicalDamage">
++				<power>100</power>
++				<pAtkMod>0.12</pAtkMod>
++				<pDefMod>0.01</pDefMod>
++				<overHit>true</overHit>
++			</effect>
++			<effect name="BlockControl" />
++			<effect name="Fear" />
++			<effect name="MagicalAttack">
++				<power>18000</power>
++				<criticalChance>50</criticalChance>
++			</effect>
++			<effect name="DefenceTrait">
++				<HOLD>100</HOLD>
++				<KNOCKDOWN>100</KNOCKDOWN>
++				<SHOCK>100</SHOCK>
++				<AIRBIND>100</AIRBIND>
++				<SLEEP>100</SLEEP>
++				<KNOCKBACK>100</KNOCKBACK>
++				<CHANGEBODY>100</CHANGEBODY>
++			</effect>
++		</effects>
++	</skill>
++	<skill id="34466" toLevel="1" name="Scream of Pain">
++		<!-- A zombie sacrifices itself on the order from Guillotine, knocking you down. The effect cannot be removed or resisted. -->
++		<icon>icon.skill0092</icon>
++		<abnormalLevel>1</abnormalLevel>
++		<abnormalTime>5</abnormalTime>
++		<abnormalType>KNOCKDOWN</abnormalType>
++		<abnormalVisualEffect>KNOCKDOWN</abnormalVisualEffect>
++		<affectLimit>5-12</affectLimit>
++		<affectRange>200</affectRange>
++		<activateRate>50</activateRate>
++		<basicProperty>PHYSICAL</basicProperty>
++		<attributeType>DARK</attributeType>
++		<attributeValue>580</attributeValue>
++		<lvlBonusRate>30</lvlBonusRate>
++		<operateType>A2</operateType>
++		<mpConsume>1</mpConsume>
++		<magicCriticalRate>45</magicCriticalRate>
++		<magicLevel>126</magicLevel>
++		<hitTime>500</hitTime>
++		<coolTime>500</coolTime>
++		<reuseDelay>5000</reuseDelay>
++		<isDebuff>true</isDebuff>
++		<trait>KNOCKDOWN</trait>
++		<effectPoint>-130</effectPoint>
++		<targetType>SELF</targetType>
++		<affectScope>POINT_BLANK</affectScope>
++		<affectObject>NOT_FRIEND</affectObject>
++		<effects>
++			<effect name="PhysicalDamage">
++				<power>100</power>
++				<pAtkMod>0.12</pAtkMod>
++				<pDefMod>0.01</pDefMod>
++				<overHit>true</overHit>
++			</effect>
++			<effect name="KnockBack">
++				<speed>400</speed>
++				<distance>25</distance>
++				<knockDown>true</knockDown>
++			</effect>
++			<effect name="DefenceTrait">
++				<HOLD>100</HOLD>
++				<KNOCKDOWN>100</KNOCKDOWN>
++				<SHOCK>100</SHOCK>
++				<AIRBIND>100</AIRBIND>
++				<SLEEP>100</SLEEP>
++				<KNOCKBACK>100</KNOCKBACK>
++				<CHANGEBODY>100</CHANGEBODY>
++				<DERANGEMENT>100</DERANGEMENT>
++			</effect>
++			<effect name="BlockActions">
++				<allowedSkills>10279;10517;10025;10776;11770;1904;11264;11093;13314;1912;7002;18721;18722;28203;30516;35190</allowedSkills>
++			</effect>
++		</effects>
+ 	</skill>
+ 	<skill id="34467" toLevel="1" name="Sel Mahum's Flame Hammer">
+ 		<!-- Physical attack -->
